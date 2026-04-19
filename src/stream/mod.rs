@@ -82,6 +82,16 @@ impl Stream {
                                     // cut off "data: " and extra spaces:
                                     let json_part = &trimmed[5..].trim();
 
+                                    // if nothing to read:
+                                    if json_part.is_empty() {
+                                        continue;
+                                    }
+
+                                    // stream marked as finished (in some API standarts):
+                                    if *json_part == "[DONE]" {
+                                        return;
+                                    }
+
                                     // if it's not an empty ping, deserializing it:
                                     if !json_part.is_empty() {
                                         match serde_json::from_str::<T>(json_part) {
