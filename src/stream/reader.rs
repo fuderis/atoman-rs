@@ -33,6 +33,16 @@ impl<T> StreamReader<T> {
         }
     }
 
+    /// Reads the following T object
+    pub async fn next(&mut self) -> Result<Option<T>> {
+        self.read().await
+    }
+
+    /// Tries to read following T object (without waiting)
+    pub async fn try_next(&mut self) -> Result<Option<T>> {
+        self.read().await
+    }
+
     /// Checks the channel for closed
     pub fn is_closed(&self) -> bool {
         self.rx.is_none()

@@ -2,7 +2,7 @@ use super::*;
 use crate::prelude::*;
 
 use chrono::{DateTime, Utc};
-use tokio::fs::{self, ReadDir};
+use tokio::fs;
 
 #[cfg(feature = "search")]
 use regex::Regex;
@@ -67,41 +67,48 @@ impl Dir {
     }
 
     /// Returns the entries reader
-    pub async fn read(path: impl AsRef<Path>) -> Result<ReadDir> {
-        Ok(fs::read_dir(path).await?)
-    }
-
-    /// Reads & returns only all the dirs
-    pub async fn read_dirs(path: impl AsRef<Path>) -> Result<Vec<Entry>> {
-        let mut entries = Self::read(path).await?;
-        let mut results = vec![];
-        while let Some(entry) = entries.next_entry().await? {
-            if entry.file_type().await?.is_dir() {
-                results.push(Entry::new(entry.path()));
-            }
-        }
-        Ok(results)
-    }
-
-    /// Reads & returns only all the files
-    pub async fn read_files(path: impl AsRef<Path>) -> Result<Vec<Entry>> {
-        let mut entries = Self::read(path).await?;
-        let mut results = vec![];
-        while let Some(entry) = entries.next_entry().await? {
-            if entry.file_type().await?.is_file() {
-                results.push(Entry::new(entry.path()));
-            }
-        }
-        Ok(results)
+    pub async fn read(path: impl AsRef<Path>) -> Result<Entries> {
+        let inner = fs::read_dir(path).await?;
+        Ok(Entries::new(inner))
     }
 
     /// Reads & returns all the entries
     pub async fn read_all(path: impl AsRef<Path>) -> Result<Vec<Entry>> {
         let mut entries = Self::read(path).await?;
         let mut results = vec![];
+
         while let Some(entry) = entries.next_entry().await? {
-            results.push(Entry::new(entry.path()));
+            results.push(entry);
         }
+
+        Ok(results)
+    }
+
+    /// Reads & returns only all the dirs
+    pub async fn read_all_dirs(path: impl AsRef<Path>) -> Result<Vec<Entry>> {
+        let mut entries = Self::read(path).await?;
+        let mut results = vec![];
+
+        while let Some(entry) = entries.next_entry().await? {
+            if entry.file_type().is_dir() {
+                results.push(entry);
+            }
+        }
+
+        Ok(results)
+    }
+
+    /// Reads & returns only all the files
+    pub async fn read_all_files(path: impl AsRef<Path>) -> Result<Vec<Entry>> {
+        let mut entries = Self::read(path).await?;
+        let mut results = vec![];
+
+        while let Some(entry) = entries.next_entry().await? {
+            if entry.file_type().is_file() {
+                results.push(entry);
+            }
+        }
+
         Ok(results)
     }
 
@@ -113,16 +120,19 @@ impl Dir {
     {
         let mut entries = Self::read(path).await?;
         while let Some(entry) = entries.next_entry().await? {
-            let ft = entry.file_type().await?;
+            let ft = entry.file_type();
+
             if ft.is_symlink() {
                 continue;
             }
+
             if ft.is_dir() {
-                on_dir(Entry::new(entry.path()));
+                on_dir(entry);
             } else {
-                on_file(Entry::new(entry.path()));
+                on_file(entry);
             }
         }
+
         Ok(())
     }
 
@@ -169,15 +179,10 @@ impl Dir {
         coef: f32,
         files_only: bool,
     ) -> Result<Vec<PathBuf>> {
-        // searching at the current level (using the cache):
-        {
-            let results = self.search(pattern, coef, files_only);
-            if !results.is_empty() {
-                return Ok(results);
-            }
-        }
+        // searching at current level (using the cache):
+        let mut results = self.search(pattern, coef, files_only);
 
-        // if the current level is empty, go deeper:
+        // if current level is empty, go deeper:
         let subdirs: Vec<&Entry> = self
             .entries
             .iter()
@@ -185,17 +190,15 @@ impl Dir {
             .collect();
 
         for dir_entry in subdirs {
-            // opening the subdirectory (this will create a new Dir object and read its entries):
+            // open subdirectory (this will create a new Dir object and read its entries):
             let subdir = Dir::open(&dir_entry.path).await?;
 
-            // recursively calling deep_search for the subfolder:
-            if let Ok(results) = Box::pin(subdir.deep_search(pattern, coef, files_only)).await
-                && !results.is_empty()
-            {
-                return Ok(results);
+            // recursively call deep_search for the subfolder:
+            if let Ok(subresults) = Box::pin(subdir.deep_search(pattern, coef, files_only)).await {
+                results.extend(subresults);
             }
         }
 
-        Ok(vec![])
+        Ok(results)
     }
 }

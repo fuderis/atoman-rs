@@ -283,7 +283,9 @@ impl File {
     pub async fn rewrite_all(&mut self, data: &[u8]) -> Result<()> {
         self.seek(SeekFrom::Start(0)).await?;
         self.file.get_mut().set_len(0).await?;
-        self.write_all(data).await
+        self.write_all(data).await?;
+        self.file.flush().await?;
+        Ok(())
     }
 
     /// Cuts the file contents by new size
