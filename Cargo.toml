@@ -3,7 +3,7 @@ name = "atoman"
 description = "This library provides a static data that can be accessed safely and concurrently from any part of your program"
 keywords = ["atomic", "static", "flag", "state", "config"]
 categories = ["development-tools", "rust-patterns"]
-version = "0.2.18"
+version = "0.2.19"
 license = "MIT"
 authors = ["Bulat Sh. <t.me/fuderis>"]
 repository = "https://github.com/fuderis/atoman-rs"
@@ -13,7 +13,7 @@ edition = "2024"
 [dependencies]
 arc-swap = "1.8.0"
 once_cell = "1.21.3"
-macron = { version = "0.1.17", features = ["derive", "string"] }
+macron = { version = "0.1.18", features = ["derive", "string"] }
 tokio = { version = "1.49.0", features = ["full"] }
 serde = { version = "1.0.228", features = ["derive"], optional = true }
 serde_json = { version = "1.0.148", optional = true }
