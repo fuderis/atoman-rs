@@ -148,10 +148,10 @@ impl Dir {
     pub fn search_regex(&self, re: &Regex, files_only: bool) -> Vec<PathBuf> {
         self.entries
             .iter()
-            .filter(|e| e.kind != FileKind::Symlink)
-            .filter(|e| !files_only || e.kind == FileKind::File)
+            .filter(|e| !e.is_symlink())
+            .filter(|e| !files_only || e.is_file())
             .filter(|e| re.is_match(&e.file_name()))
-            .map(|e| e.path.clone())
+            .map(|e| e.path().clone())
             .collect()
     }
 
@@ -160,15 +160,15 @@ impl Dir {
         let candidates: Vec<_> = self
             .entries
             .iter()
-            .filter(|e| e.kind != FileKind::Symlink)
-            .filter(|e| !files_only || e.kind == FileKind::File)
+            .filter(|e| !e.is_symlink())
+            .filter(|e| !files_only || e.is_file())
             .collect();
 
         fuzzy_cmp::search_filter(&candidates, pattern, coef, true, |e| {
-            e.path.file_name().and_then(|s| s.to_str()).unwrap_or("")
+            e.path().file_name().and_then(|s| s.to_str()).unwrap_or("")
         })
         .into_iter()
-        .map(|(_, e)| e.path.clone())
+        .map(|(_, e)| e.path().clone())
         .collect()
     }
 
@@ -183,15 +183,11 @@ impl Dir {
         let mut results = self.search(pattern, coef, files_only);
 
         // if current level is empty, go deeper:
-        let subdirs: Vec<&Entry> = self
-            .entries
-            .iter()
-            .filter(|e| e.kind == FileKind::Dir)
-            .collect();
+        let subdirs: Vec<&Entry> = self.entries.iter().filter(|e| e.is_dir()).collect();
 
         for dir_entry in subdirs {
             // open subdirectory (this will create a new Dir object and read its entries):
-            let subdir = Dir::open(&dir_entry.path).await?;
+            let subdir = Dir::open(&dir_entry.path()).await?;
 
             // recursively call deep_search for the subfolder:
             if let Ok(subresults) = Box::pin(subdir.deep_search(pattern, coef, files_only)).await {

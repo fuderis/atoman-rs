@@ -91,6 +91,21 @@ impl Entry {
         &self.kind
     }
 
+    /// Returns true if entry is file
+    pub fn is_file(&self) -> bool {
+        self.kind.is_file()
+    }
+
+    /// Returns true if entry is dir
+    pub fn is_dir(&self) -> bool {
+        self.kind.is_dir()
+    }
+
+    /// Returns true if entry is symlink
+    pub fn is_symlink(&self) -> bool {
+        self.kind.is_symlink()
+    }
+
     /// Returns the entry file extension
     pub fn extension(&self) -> Option<String> {
         self.path
