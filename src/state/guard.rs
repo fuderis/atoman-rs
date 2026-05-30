@@ -8,14 +8,30 @@ pub struct StateGuard<T: Clone + Send + Sync> {
     pub(super) swap: Arc<ArcSwapAny<Arc<T>>>,
     pub(super) data: T,
     pub(super) lock: Arc<Flag>,
+    pub(super) counter: usize,
+}
+
+impl<T: Clone + Send + Sync> StateGuard<T> {
+    /// Manually synchronizes the actual data with the state
+    pub fn sync(&self) {
+        let data = Arc::new(self.data.clone());
+        *self.mutex.lock().expect(ERR_MSG) = data.clone();
+        self.swap.store(data);
+    }
+
+    /// Manually synchronizes the actual data with the state
+    /// (synchronizes only every N calls)
+    pub fn sync_n(&mut self, n: usize) {
+        if n == 0 || self.counter % n == 0 {
+            self.sync();
+        }
+        self.counter += 1;
+    }
 }
 
 impl<T: Clone + Send + Sync> ::std::ops::Drop for StateGuard<T> {
     fn drop(&mut self) {
-        let data = Arc::new(self.data.clone());
-
-        *self.mutex.lock().expect(ERR_MSG) = data.clone();
-        self.swap.store(data);
+        self.sync();
         self.lock.set(false);
     }
 }

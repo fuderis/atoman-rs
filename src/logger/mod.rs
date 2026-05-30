@@ -143,7 +143,7 @@ async fn worker(mut rx: mpsc::Receiver<LogPayload>) {
 
         // update datetime string only if a second has passed:
         if seconds != timestamp {
-            datetime = now.format("%Y-%m-%dT%H:%M:%S").to_string();
+            datetime = now.format("%Y-%m-%dT%H:%M:%SZ").to_string();
             timestamp = seconds;
         }
 
@@ -157,7 +157,7 @@ async fn worker(mut rx: mpsc::Receiver<LogPayload>) {
                 log::Level::Debug => "\x1b[34m", // blue
                 log::Level::Trace => "\x1b[36m", // cyan
             };
-            println!("{datetime}Z {clr}{lvl:<5}\x1b[0m {msg}");
+            println!("{datetime} {clr}{lvl:<5}\x1b[0m {msg}");
         }
 
         // if file path is not set, continue:

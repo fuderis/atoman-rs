@@ -74,6 +74,7 @@ impl<T: Default + Clone + Send + Sync> State<T> {
             swap: self.wrap.swap.clone(),
             data: self.dirty_get_cloned(),
             lock: self.wrap.lock.clone(),
+            counter: 0,
         }
     }
 
