@@ -3,7 +3,7 @@ pub use reader::StreamReader;
 pub mod sender;
 pub use sender::StreamSender;
 
-pub use bytes::{self, Bytes};
+pub use bytes::{self, Bytes, BytesMut};
 pub use futures::{self, StreamExt};
 
 use crate::prelude::*;
@@ -61,47 +61,44 @@ impl Stream {
         let (tx, rx) = Stream::new::<T>();
 
         tokio::spawn(async move {
-            let mut buffer = Vec::new();
+            let mut buffer = BytesMut::new();
 
             while let Some(res) = source.next().await {
                 match res {
                     Ok(bytes) => {
+                        // insert new bytes:
                         buffer.extend_from_slice(&bytes);
 
-                        // looking for a separator for the end of the event \n\n:
+                        // search chunk splitter (\n\n)
                         while let Some(pos) = buffer.windows(2).position(|w| w == b"\n\n") {
-                            // separating the full message (along with \n\n):
-                            let full_message = buffer.drain(..pos + 2).collect::<Vec<u8>>();
+                            // cut off exactly to the end of the message in O(1) without copying:
+                            // (buffer keeps everything AFTER pos +2, and full_message gets the start)
+                            let full_message = buffer.split_to(pos + 2).freeze();
 
-                            // convert it into a string for the convenience of cropping "data: ":
+                            // parsing from the byte slice (from_utf8 does not allocate):
                             if let Ok(line) = std::str::from_utf8(&full_message) {
                                 let trimmed = line.trim();
 
-                                // we check that this is exactly the data:
                                 if trimmed.starts_with("data:") {
-                                    // cut off "data: " and extra spaces:
-                                    let json_part = &trimmed[5..].trim();
+                                    let json_part = trimmed[5..].trim();
 
-                                    // if nothing to read:
                                     if json_part.is_empty() {
                                         continue;
                                     }
 
-                                    // stream marked as finished (in some API standarts):
-                                    if *json_part == "[DONE]" {
+                                    if json_part == "[DONE]" {
                                         return;
                                     }
 
-                                    // if it's not an empty ping, deserializing it:
-                                    if !json_part.is_empty() {
-                                        match serde_json::from_str::<T>(json_part) {
-                                            Ok(item) => {
-                                                if tx.send(item).is_err() {
-                                                    return; // reader is closed..
-                                                }
+                                    match serde_json::from_str::<T>(json_part) {
+                                        Ok(item) => {
+                                            if tx.send(item).is_err() {
+                                                return;
                                             }
-                                            Err(e) => {
-                                                tx.send_err(e.into()).ok();
+                                        }
+                                        Err(e) => {
+                                            if tx.send_err(e.into()).is_err() {
+                                                return;
                                             }
                                         }
                                     }
