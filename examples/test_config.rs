@@ -1,9 +1,9 @@
 #![cfg(feature = "config")]
-use atoman::prelude::*;
+use atoman::Config;
 use serde::{Deserialize, Serialize};
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     #[derive(Debug, Clone, Serialize, Deserialize)]
     struct Person {
         name: String,

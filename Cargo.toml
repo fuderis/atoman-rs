@@ -3,7 +3,7 @@ name = "atoman"
 description = "This library provides a static data that can be accessed safely and concurrently from any part of your program"
 keywords = ["atomic", "static", "flag", "state", "config"]
 categories = ["development-tools", "rust-patterns"]
-version = "0.2.22"
+version = "0.2.23"
 license = "MIT"
 authors = ["Bulat Sh. <synapdrake@ya.ru>"]
 repository = "https://github.com/fuderis/atoman-rs"
@@ -24,14 +24,18 @@ futures = { version = "0.3.31", optional = true }
 bytes = { version = "1.11.1", optional = true }
 regex = { version = "1.12.3", optional = true }
 fuzzy-cmp = { version = "0.1.3", optional = true }
+tracing = { version = "0.1.44", optional = true }
+tracing-subscriber = { version = "0.3.23", optional = true }
 
 [features]
 full = ["config", "logger", "trace", "stream", "file", "search"]
 config = ["json-config", "toml-config", "dep:chrono"]
 json-config = ["dep:serde", "dep:serde_json"]
 toml-config = ["dep:serde", "dep:toml"]
-logger = ["dep:log", "dep:chrono", "dep:bytes"]
+logger = ["dep:tracing", "dep:tracing-subscriber",  "dep:chrono", "dep:bytes"]
 trace = []
 stream = ["dep:futures", "dep:bytes", "dep:serde", "dep:serde_json"]
 file = ["dep:bytes", "dep:chrono", "dep:serde"]
 search = ["dep:regex", "dep:fuzzy-cmp"]
+tracing = ["dep:tracing"]
+tracing-subscriber = ["dep:tracing-subscriber"]

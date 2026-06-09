@@ -6,11 +6,6 @@ pub enum Error {
     #[from]
     Io(std::io::Error),
 
-    #[cfg(feature = "logger")]
-    #[from]
-    #[display = "Logger initialize error: {0}"]
-    LoggerInit(log::SetLoggerError),
-
     #[cfg(any(feature = "json-config", feature = "toml-config"))]
     #[display = "Unsupported config extension '.{0}'."]
     ConfigExt(String),

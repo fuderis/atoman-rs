@@ -2,22 +2,25 @@ use crate::{flag::Flag, prelude::*, state::State};
 use std::{
     collections::VecDeque,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 use tokio::{
     fs::{self as tfs, File},
-    io::{self as tio, AsyncBufReadExt, AsyncReadExt, AsyncSeekExt},
+    io::{self as tio, AsyncBufReadExt, AsyncSeekExt, BufReader},
     sync::Mutex,
     task::JoinHandle,
     time::{Duration, sleep},
 };
 
-/// High-performance async log tracer
+/// High-performance async log tracer with dynamic filtering
 #[derive(Debug, Clone)]
 pub struct Trace {
     path: PathBuf,
-    file: Arc<Mutex<File>>,
+    #[allow(dead_code)]
+    reader: Arc<Mutex<BufReader<File>>>,
     stack: Arc<State<VecDeque<String>>>,
     available: Arc<Flag>,
+    filters: Arc<State<Vec<String>>>,
     _reader_handle: Arc<JoinHandle<()>>,
 }
 
@@ -27,46 +30,48 @@ impl Trace {
         &self.path
     }
 
+    /// Updates filters on the fly (e.g. when admin changes target user)
+    pub async fn update_filters(&self, new_filters: Vec<String>) {
+        *self.filters.lock().await = new_filters;
+    }
+
     /// Opens file and starts background metadata polling task
-    /// * file_path: path to file
-    /// * timeout: file check timeout
-    /// * only_new: true - trace only new data, false - trace old writed content too
     pub async fn open<P: AsRef<Path>>(
         file_path: P,
         timeout: Duration,
+        filters: Vec<String>,
         only_new: bool,
     ) -> Result<Self> {
         let path = file_path.as_ref().to_path_buf();
-        let file = {
-            let f = File::open(&file_path).await.map_err(Error::OpenFile)?;
-            Arc::new(Mutex::new(f))
-        };
-        let stack = Arc::new(State::from(VecDeque::with_capacity(5)));
-        let available = Arc::new(Flag::from(false));
+        let file = File::open(&file_path).await.map_err(Error::OpenFile)?;
+        let mut reader = BufReader::new(file);
 
-        // read already existing data:
+        if only_new {
+            let _ = reader.seek(tio::SeekFrom::End(0)).await;
+        }
+
+        let reader = Arc::new(Mutex::new(reader));
+        let stack = Arc::new(State::from(VecDeque::with_capacity(32)));
+        let available = Arc::new(Flag::from(false));
+        let filters = Arc::new(State::from(filters));
+
         if !only_new {
-            let mut f = file.lock().await;
-            if let Ok(initial_lines) = Self::read_new_lines(&mut f).await {
-                stack.lock().await.extend(initial_lines);
-                if !stack.lock().await.is_empty() {
+            let mut r = reader.lock().await;
+            let current_filters = filters.dirty_get();
+            if let Ok(initial_lines) = Self::read_available_lines(&mut r, &current_filters).await {
+                if !initial_lines.is_empty() {
+                    stack.lock().await.extend(initial_lines);
                     available.set(true);
                 }
             }
         }
-        // or just set cursor to file end:
-        else {
-            let mut f = file.lock().await;
-            f.seek(std::io::SeekFrom::End(0)).await?;
-        }
 
-        // clone data for spawn:
         let path_clone = path.clone();
-        let file_clone = file.clone();
+        let reader_clone = reader.clone();
         let stack_clone = stack.clone();
         let available_clone = available.clone();
+        let filters_clone = filters.clone();
 
-        // spawn background file monitoring task:
         let reader_handle = tokio::spawn(async move {
             let mut last_mod = tfs::metadata(&path_clone)
                 .await
@@ -74,15 +79,30 @@ impl Trace {
                 .and_then(|m| m.modified().ok())
                 .unwrap_or(std::time::UNIX_EPOCH);
 
+            let mut last_size = tfs::metadata(&path_clone)
+                .await
+                .map(|m| m.len())
+                .unwrap_or(0);
+
             loop {
-                if let Ok(Ok(mod_time)) = tokio::fs::metadata(&path_clone)
-                    .await
-                    .map(|meta| meta.modified())
-                {
-                    // check file last update:
-                    if mod_time > last_mod {
-                        let mut file = file_clone.lock().await;
-                        if let Ok(new_lines) = Self::read_new_lines(&mut file).await
+                if let Ok(meta) = tfs::metadata(&path_clone).await {
+                    let mod_time = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
+                    let current_size = meta.len();
+
+                    if current_size < last_size {
+                        if let Ok(new_file) = File::open(&path_clone).await {
+                            let mut r = reader_clone.lock().await;
+                            *r = BufReader::new(new_file);
+                            last_size = 0;
+                        }
+                    }
+
+                    if mod_time > last_mod || current_size > last_size {
+                        let mut r = reader_clone.lock().await;
+                        let current_filters = filters_clone.lock().await.clone();
+
+                        if let Ok(new_lines) =
+                            Self::read_available_lines(&mut r, &current_filters).await
                             && !new_lines.is_empty()
                         {
                             stack_clone.lock().await.extend(new_lines);
@@ -91,6 +111,7 @@ impl Trace {
                             }
                         }
                         last_mod = mod_time;
+                        last_size = current_size;
                     }
                 }
 
@@ -100,38 +121,46 @@ impl Trace {
 
         Ok(Self {
             path,
-            file,
+            reader,
             stack,
             available,
+            filters,
             _reader_handle: Arc::new(reader_handle),
         })
     }
 
-    /// Fast checks for a new line available
-    pub async fn check(&self) -> Option<Vec<String>> {
+    /// Fast non-blocking check for available lines in the stack
+    pub async fn try_read(&self) -> Option<Vec<String>> {
         let mut lines = vec![];
-        while let Some(line) = self.stack.lock().await.pop_front() {
+        let mut s = self.stack.lock().await;
+
+        while let Some(line) = s.pop_front() {
             lines.push(line);
         }
 
-        if lines.is_empty() { None } else { Some(lines) }
+        if lines.is_empty() {
+            None
+        } else {
+            if self.available.is_true() {
+                self.available.set(false);
+            }
+            Some(lines)
+        }
     }
 
-    /// Reads next line from stack (waits until available)
-    pub async fn next(&self) -> Option<Vec<String>> {
+    /// Async stream reader (waits until filtered lines appear)
+    pub async fn read(&self) -> Option<Vec<String>> {
         loop {
-            // wait until new lines are available:
             while self.available.is_false() {
                 self.available.wait(true).await;
             }
 
-            // get line from stack:
             let mut lines = vec![];
-            while let Some(line) = self.stack.lock().await.pop_front() {
+            let mut s = self.stack.lock().await;
+            while let Some(line) = s.pop_front() {
                 lines.push(line);
             }
 
-            // stack empty - reset flag:
             if lines.is_empty() {
                 self.available.set(false);
             } else {
@@ -140,38 +169,25 @@ impl Trace {
         }
     }
 
-    /// Reads entire file content as Vec<String>
-    pub async fn read_all(&self) -> Result<Vec<String>> {
-        let mut f = self.file.lock().await;
-        let mut buf = Vec::<u8>::with_capacity(128);
-
-        f.rewind().await.map_err(Error::ReadFile)?;
-        f.read_to_end(&mut buf).await.map_err(Error::ReadFile)?;
-
-        let content = String::from_utf8_lossy(&buf);
-        Ok(content.lines().map(|s| s.to_string()).collect())
-    }
-
-    /// Reads new lines from current file position to end
-    async fn read_new_lines(file: &mut File) -> Result<VecDeque<String>> {
-        let current_pos = file.stream_position().await.map_err(Error::ReadFile)?;
-
-        // create buffered reader from current position:
-        let mut reader = tio::BufReader::new(file);
-        reader
-            .seek(tio::SeekFrom::Start(current_pos))
-            .await
-            .map_err(Error::ReadFile)?;
-
+    /// Reads all lines from the current position to EOF with intersection filter
+    async fn read_available_lines(
+        reader: &mut BufReader<File>,
+        filters: &[String],
+    ) -> Result<VecDeque<String>> {
         let mut new_lines = VecDeque::new();
         let mut line = String::new();
 
-        // read all new lines until EOF:
         while reader.read_line(&mut line).await.map_err(Error::ReadFile)? > 0 {
             if line.ends_with('\n') {
                 line.pop();
             }
-            if !line.is_empty() {
+            if line.ends_with('\r') {
+                line.pop();
+            }
+
+            let is_match = filters.is_empty() || filters.iter().all(|f| line.contains(f));
+
+            if is_match && !line.is_empty() {
                 new_lines.push_back(line.clone());
             }
             line.clear();
