@@ -8,7 +8,7 @@ pub struct FlagWrap {
     notify: Arc<Notify>,
 }
 
-/// The atomic flag
+/// The atomic flag for concurrent locks
 pub struct Flag {
     wrap: Lazy<Arc<FlagWrap>>,
 }
@@ -26,64 +26,57 @@ impl Flag {
         }
     }
 
-    /// Check state for 'true'
-    pub fn is_true(&self) -> bool {
-        self.get()
+    /// Returns true if flag is locked
+    pub fn is_locked(&self) -> bool {
+        self.wrap.state.load(Ordering::Acquire)
     }
 
-    /// Check state for 'false'
-    pub fn is_false(&self) -> bool {
-        !self.get()
+    /// Try to lock capture without waiting
+    /// (returns `true` if flag successfully locked)
+    pub fn try_lock(&self) -> bool {
+        self.wrap
+            .state
+            .compare_exchange(
+                false, // wait for unlock
+                true,  // locking
+                Ordering::Acquire,
+                Ordering::Relaxed,
+            )
+            .is_ok()
     }
 
-    /// Get actual state
-    pub fn get(&self) -> bool {
-        self.wrap.state.load(Ordering::SeqCst)
-    }
-
-    /// Set a new state
-    pub fn set(&self, value: bool) {
-        self.wrap.state.store(value, Ordering::SeqCst);
+    /// Releases the lock and notify the waiting threads/tasks
+    pub fn unlock(&self) {
+        self.wrap.state.store(false, Ordering::Release);
         self.wrap.notify.notify_waiters();
     }
 
-    /// Wait for state change
-    pub async fn wait(&self, value: bool) {
-        while self.get() != value {
+    /// Asynchronously waits for the release and capture the lock
+    pub async fn lock(&self) {
+        while !self.try_lock() {
             self.wrap.notify.notified().await;
         }
     }
 
-    /// Wait for state change (with synchronously blocking)
-    pub fn blocking_wait(&self, value: bool) {
-        while self.get() != value {
-            std::thread::yield_now();
+    /// Synchronously blocks the thread until the lock is released and captured
+    pub fn blocking_lock(&self) {
+        while !self.try_lock() {
+            std::thread::sleep(Duration::from_micros(50));
         }
     }
 
-    /// Wait for state change by interval (with synchronously blocking)
-    pub fn blocking_wait_timeout(&self, value: bool, timeout: Duration) -> bool {
+    /// Synchronously waits for lock capture with timeout
+    /// (returns `true` if lock successfully captured)
+    pub fn blocking_lock_timeout(&self, timeout: Duration) -> bool {
         let deadline = Instant::now() + timeout;
 
-        while self.get() != value {
+        while !self.try_lock() {
             if Instant::now() > deadline {
-                return false;
+                return false; // timeout
             }
-            std::thread::yield_now();
+            std::thread::sleep(Duration::from_micros(50));
         }
         true
-    }
-
-    /// Wait & swap flag
-    pub async fn swap(&self, value: bool) {
-        self.wait(!value).await;
-        self.set(value);
-    }
-
-    /// Wait & swap flag (with synchronously blocking)
-    pub fn blocking_swap(&self, value: bool) {
-        self.blocking_wait(!value);
-        self.set(value);
     }
 }
 
@@ -95,13 +88,13 @@ impl ::std::default::Default for Flag {
 
 impl ::std::fmt::Debug for Flag {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-        write!(f, "{:?}", &self.get())
+        write!(f, "{:?}", &self.is_locked())
     }
 }
 
 impl ::std::fmt::Display for Flag {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-        write!(f, "{}", &self.get())
+        write!(f, "{}", &self.is_locked())
     }
 }
 
@@ -109,27 +102,19 @@ impl ::std::cmp::Eq for Flag {}
 
 impl ::std::cmp::PartialEq for Flag {
     fn eq(&self, other: &Self) -> bool {
-        self.get() == other.get()
+        self.is_locked() == other.is_locked()
     }
 }
 
 impl ::std::cmp::PartialEq<bool> for Flag {
     fn eq(&self, other: &bool) -> bool {
-        &self.get() == other
-    }
-}
-
-impl ::std::convert::From<bool> for Flag {
-    fn from(value: bool) -> Self {
-        let this = Self::new();
-        this.set(value);
-        this
+        &self.is_locked() == other
     }
 }
 
 #[allow(clippy::from_over_into)]
 impl ::std::convert::Into<bool> for Flag {
     fn into(self) -> bool {
-        self.get()
+        self.is_locked()
     }
 }

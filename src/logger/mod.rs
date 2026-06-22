@@ -5,7 +5,10 @@ use tracing_subscriber::{Layer, layer::Context, registry::LookupSpan};
 
 use bytes::{BufMut, BytesMut};
 use chrono::Utc;
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::atomic::{AtomicU8, Ordering},
+};
 use tokio::{
     fs::{self, File},
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter},
@@ -13,7 +16,8 @@ use tokio::{
 };
 
 const BUFFER_SIZE: usize = 500_000;
-static LOGGER_STATE: State<LoggerState> = State::new();
+static CURRENT_LEVEL: AtomicU8 = AtomicU8::new(3);
+static LOGGER_STATE: State<LoggerState> = State::default();
 
 /// The log command
 enum LogCmd {
@@ -45,46 +49,63 @@ impl Logger {
 
     /// Returns the current log level
     pub fn level() -> Level {
-        LOGGER_STATE
-            .dirty_get()
-            .level
-            .clone()
-            .unwrap_or(Level::INFO)
+        match CURRENT_LEVEL.load(Ordering::Relaxed) {
+            1 => Level::ERROR,
+            2 => Level::WARN,
+            4 => Level::DEBUG,
+            5 => Level::TRACE,
+            _ => Level::INFO,
+        }
     }
 
     /// Changes the log level
     pub async fn set_level(level: Level) {
+        let num = match level {
+            Level::ERROR => 1,
+            Level::WARN => 2,
+            Level::INFO => 3,
+            Level::DEBUG => 4,
+            Level::TRACE => 5,
+        };
+
+        CURRENT_LEVEL.store(num, Ordering::Relaxed);
         LOGGER_STATE.lock().await.level.replace(level);
     }
 
     /// Initializes the logger
     pub async fn init<P: Into<PathBuf>>(logs_dir: P, max_files: usize) -> Result<()> {
         let logs_dir = logs_dir.into();
-        fs::create_dir_all(&logs_dir).await?;
 
-        if max_files > 0 {
-            let mut entries = fs::read_dir(&logs_dir).await?;
-            let mut files = vec![];
-            while let Some(entry) = entries.next_entry().await? {
-                let path = entry.path();
-                if path.extension().map_or(false, |ext| ext == "log") {
-                    files.push((path, entry.metadata().await.and_then(|m| m.created()).ok()));
+        let path = if !logs_dir.as_os_str().is_empty() {
+            fs::create_dir_all(&logs_dir).await?;
+
+            if max_files > 0 {
+                let mut entries = fs::read_dir(&logs_dir).await?;
+                let mut files = vec![];
+                while let Some(entry) = entries.next_entry().await? {
+                    let path = entry.path();
+                    if path.extension().map_or(false, |ext| ext == "log") {
+                        files.push((path, entry.metadata().await.and_then(|m| m.created()).ok()));
+                    }
+                }
+                files.sort_by_key(|(_, time)| *time);
+                if files.len() > max_files {
+                    for (old_file, _) in &files[0..files.len() - max_files] {
+                        let _ = fs::remove_file(old_file).await;
+                    }
                 }
             }
-            files.sort_by_key(|(_, time)| *time);
-            if files.len() > max_files {
-                for (old_file, _) in &files[0..files.len() - max_files] {
-                    let _ = fs::remove_file(old_file).await;
-                }
-            }
-        }
 
-        let path = Self::gen_path(logs_dir);
+            Some(Self::gen_path(logs_dir))
+        } else {
+            None
+        };
+
         let (tx, rx) = mpsc::channel(BUFFER_SIZE);
 
         LOGGER_STATE
             .set(LoggerState {
-                path: Some(path),
+                path,
                 tx: Some(tx.clone()),
                 level: None,
             })

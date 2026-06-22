@@ -33,17 +33,16 @@ static IS_ACTIVE: Flag = Flag::new();
 
 #[tokio::main]
 async fn main() {
-    assert!(!IS_ACTIVE.get());
-    assert!(IS_ACTIVE.is_false());
+    assert!(!IS_ACTIVE.is_locked());
 
-    IS_ACTIVE.set(true);
-    assert!(IS_ACTIVE.get());
+    IS_ACTIVE.lock().await;
+    assert!(IS_ACTIVE.is_locked());
 
-    IS_ACTIVE.swap(false).await;
-    assert!(!IS_ACTIVE.get());
+    IS_ACTIVE.unlock();
+    assert!(!IS_ACTIVE.is_locked());
 
-    IS_ACTIVE.blocking_swap(true);
-    assert!(IS_ACTIVE.get());
+    IS_ACTIVE.blocking_lock();
+    assert!(IS_ACTIVE.is_locked());
 }
 ```
 
@@ -51,7 +50,7 @@ async fn main() {
 ```rust
 use atoman::prelude::*;
 
-static CONFIG: State<Config> = State::new();
+static CONFIG: State<Config> = State::new(|| 10);
 
 #[derive(Default, Clone)]
 pub struct Config {
@@ -60,15 +59,14 @@ pub struct Config {
 
 #[tokio::main]
 async fn main() {
-    CONFIG.set(Config { count: 10, }).await;
     assert_eq!(CONFIG.get().await.count, 10);
 
     CONFIG.blocking_set(Config { count: 15 });
     assert_eq!(CONFIG.blocking_get().count, 15);
 
-    CONFIG.map(|cfg| cfg.count = 20).await;
-    assert_eq!(CONFIG.get().await.count, 20);
-    
+    CONFIG.dirty_set(Config { count: 20 });
+    assert_eq!(CONFIG.dirty_get().count, 20);
+
     CONFIG.lock().await.count = 30;
     assert_eq!(CONFIG.get().await.count, 30);
 }
@@ -76,7 +74,7 @@ async fn main() {
 
 ### Config (feature `config`):
 ```rust
-use atoman::prelude::*;
+use atoman::{Config};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct Person {
@@ -94,7 +92,7 @@ impl Default for Person {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut cfg = Config::<Person>::new(".test/person.toml").await?;
     
     assert_eq!(cfg.name, "Bob");
@@ -109,11 +107,12 @@ async fn main() -> Result<()> {
 
 ### Logger (feature `logger`):
 ```rust
-use atoman::prelude::*;
+use atoman::{Logger, Level, info};
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     Logger::init(".logs", 1000).await?;
+    Logger::set_level(Level::TRACE);
         
     info!("Hello, World!");
 

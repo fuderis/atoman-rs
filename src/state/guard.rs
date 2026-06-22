@@ -32,7 +32,16 @@ impl<T: Clone + Send + Sync> StateGuard<T> {
 impl<T: Clone + Send + Sync> ::std::ops::Drop for StateGuard<T> {
     fn drop(&mut self) {
         self.sync();
-        self.lock.set(false);
+        self.lock.unlock();
+
+        #[cfg(feature = "trace-lock")]
+        {
+            trace!(
+                "[State<{}>] [{:?}] Unlocked",
+                std::any::type_name::<T>(),
+                std::thread::current().id(),
+            );
+        }
     }
 }
 

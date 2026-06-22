@@ -52,7 +52,7 @@ impl Trace {
 
         let reader = Arc::new(Mutex::new(reader));
         let stack = Arc::new(State::from(VecDeque::with_capacity(32)));
-        let available = Arc::new(Flag::from(false));
+        let available = Arc::new(Flag::new());
         let filters = Arc::new(State::from(filters));
 
         if !only_new {
@@ -61,7 +61,7 @@ impl Trace {
             if let Ok(initial_lines) = Self::read_available_lines(&mut r, &current_filters).await {
                 if !initial_lines.is_empty() {
                     stack.lock().await.extend(initial_lines);
-                    available.set(true);
+                    let _ = available.try_lock();
                 }
             }
         }
@@ -103,11 +103,10 @@ impl Trace {
 
                         if let Ok(new_lines) =
                             Self::read_available_lines(&mut r, &current_filters).await
-                            && !new_lines.is_empty()
                         {
-                            stack_clone.lock().await.extend(new_lines);
-                            if available_clone.is_false() {
-                                available_clone.set(true);
+                            if !new_lines.is_empty() {
+                                stack_clone.lock().await.extend(new_lines);
+                                available_clone.unlock();
                             }
                         }
                         last_mod = mod_time;
@@ -141,9 +140,7 @@ impl Trace {
         if lines.is_empty() {
             None
         } else {
-            if self.available.is_true() {
-                self.available.set(false);
-            }
+            let _ = self.available.try_lock();
             Some(lines)
         }
     }
@@ -151,9 +148,7 @@ impl Trace {
     /// Async stream reader (waits until filtered lines appear)
     pub async fn read(&self) -> Option<Vec<String>> {
         loop {
-            while self.available.is_false() {
-                self.available.wait(true).await;
-            }
+            self.available.lock().await;
 
             let mut lines = vec![];
             let mut s = self.stack.lock().await;
@@ -162,7 +157,7 @@ impl Trace {
             }
 
             if lines.is_empty() {
-                self.available.set(false);
+                continue;
             } else {
                 return Some(lines);
             }
