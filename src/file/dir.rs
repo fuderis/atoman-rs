@@ -19,14 +19,14 @@ impl Dir {
     pub async fn open(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
 
-        // create dir struct:
+        // create dir struct
         let mut instance = Self {
             path,
             metadata: None,
             entries: vec![],
         };
 
-        // update metadata & read entries:
+        // update metadata & read entries
         instance.refresh().await?;
 
         Ok(instance)
@@ -45,7 +45,7 @@ impl Dir {
             && let Ok(m) = fs::metadata(&self.path).await
             && let Ok(modified_system) = m.modified()
         {
-            // converting SystemTime from FS to DateTime<Utc> for comparison:
+            // converting SystemTime from FS to DateTime<Utc> for comparison
             let current_modified: DateTime<Utc> = modified_system.into();
             return current_modified != meta.modified;
         }
@@ -179,17 +179,17 @@ impl Dir {
         coef: f32,
         files_only: bool,
     ) -> Result<Vec<PathBuf>> {
-        // searching at current level (using the cache):
+        // searching at current level (using the cache)
         let mut results = self.search(pattern, coef, files_only);
 
-        // if current level is empty, go deeper:
+        // if current level is empty, go deeper
         let subdirs: Vec<&Entry> = self.entries.iter().filter(|e| e.is_dir()).collect();
 
         for dir_entry in subdirs {
-            // open subdirectory (this will create a new Dir object and read its entries):
+            // open subdirectory (this will create a new Dir object and read its entries)
             let subdir = Dir::open(&dir_entry.path()).await?;
 
-            // recursively call deep_search for the subfolder:
+            // recursively call deep_search for the subfolder
             if let Ok(subresults) = Box::pin(subdir.deep_search(pattern, coef, files_only)).await {
                 results.extend(subresults);
             }

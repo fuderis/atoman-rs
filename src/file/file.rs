@@ -58,7 +58,7 @@ impl File {
         let path = path.as_ref().to_path_buf();
         let mut options = OpenOptions::new();
 
-        // set the file open mode:
+        // set the file open mode
         match mode {
             OpenMode::Read => {
                 options.read(true);
@@ -71,23 +71,23 @@ impl File {
             }
         }
 
-        // create parent dir if not exists (for write mode):
+        // create parent dir if not exists (for write mode)
         if mode != OpenMode::Read {
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent).await?;
             }
         }
 
-        // open raw file:
+        // open raw file
         let raw_file = options.open(&path).await?;
         let mut file = Self {
-            // creating a BufReader with the default buffer size (8KB):
+            // creating a BufReader with the default buffer size (8KB)
             file: BufReader::new(raw_file),
             metadata: None,
             path,
         };
 
-        // update metadata:
+        // update metadata
         file.refresh().await?;
 
         Ok(file)
@@ -119,8 +119,8 @@ impl File {
 
     /// Sets the cursor position
     pub async fn seek(&mut self, seek: impl Into<TokioSeekFrom>) -> Result<u64> {
-        // WARNING: When using BufReader, a regular seek will flush the internal buffer.
-        // This is normal, but it must be remembered
+        // WARNING: When using BufReader, a regular seek will flush the internal buffer
+        // (this is normal, but it must be remembered)
         let cursor = self.file.seek(seek.into()).await?;
         Ok(cursor)
     }
@@ -175,14 +175,14 @@ impl File {
     /// Reads data until a specific byte is found (Optimized with BufReader)
     pub async fn read_until(&mut self, stop_byte: u8) -> Result<Option<Bytes>> {
         let mut buffer = Vec::new();
-        // we use the native BufReader method. He reads a bunch at once into memory:
+        // we use the native BufReader method. He reads a bunch at once into memory
         let n = self.file.read_until(stop_byte, &mut buffer).await?;
 
         if n == 0 {
             return Ok(None);
         }
 
-        // if we find a stop byte, we delete it from the result:
+        // if we find a stop byte, we delete it from the result
         if buffer.last() == Some(&stop_byte) {
             buffer.pop();
         }
@@ -202,7 +202,7 @@ impl File {
         let stop_len = stop_bytes.len();
 
         loop {
-            // BufReader will still speed up this process, as read() will take data from memory:
+            // BufReader will still speed up this process, as read() will take data from memory
             let n = match self.file.read(&mut chunk).await {
                 Ok(0) => {
                     if capt_eof && !buffer.is_empty() {
@@ -228,7 +228,7 @@ impl File {
                 let match_end = abs_pos + stop_len;
                 let over_read = buffer.len() - match_end;
 
-                // returning the extra read bytes back to the stream:
+                // returning the extra read bytes back to the stream
                 if over_read > 0 {
                     self.seek_current(-(over_read as i64)).await?;
                 }

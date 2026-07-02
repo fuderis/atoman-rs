@@ -25,7 +25,7 @@ and synchronous (threads/blocking code) contexts without deadlocks or runtime co
 
 ## Examples:
 
-### Atomic Flag:
+### Atomic Flag
 ```rust
 use atoman::prelude::*;
 
@@ -46,7 +46,7 @@ async fn main() {
 }
 ```
 
-### Atomic State:
+### Atomic State
 ```rust
 use atoman::prelude::*;
 
@@ -72,7 +72,30 @@ async fn main() {
 }
 ```
 
-### Config (feature `config`):
+### Channel [feature `channel`]
+```rust
+use atoman::channel;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let (tx, mut rx) = channel::<i32>(Some(2));
+
+    tx.send(10).await?;
+    tx.send(20).await?;
+
+    assert_eq!(rx.recv().await?, Some(10));
+    assert_eq!(rx.recv().await?, Some(20));
+
+    tx.send_err("Custom error".into()).await?;
+
+    // Errors are returned as `None`.
+    assert_eq!(rx.recv().await?, None);
+
+    Ok(())
+}
+```
+
+### Config [feature `config`]
 ```rust
 use atoman::{Config};
 
@@ -105,7 +128,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 }
 ```
 
-### Logger (feature `logger`):
+### Logger [feature `logger`]
 ```rust
 use atoman::{Logger, Level, info};
 
@@ -120,7 +143,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 }
 ```
 
-### Tracing (feature `trace`):
+### Logs Tracing [feature `trace`]
 ```rust
 use atoman::{Logger, Trace, info, log};
 use tokio::time::{Duration, sleep};
@@ -190,39 +213,9 @@ fn handle(uid: u64, cicle: usize) {
 }
 ```
 
-### Stream (feature `stream`):
-```rust
-use atoman::{Stream, StreamExt, Bytes};
-
-/// Handles server page (on Axum framework as example)
-pub async fn test_page(
-    Json(data): Json<JsonValue>,
-) -> impl IntoResponse {
-    let body = Stream::body(
-        // spawn page handler:
-        move |tx| async move {
-            for i in 0..5 {
-                tx.send(Bytes::from(i.to_string())).ok()
-            }
-        }
-    )
-    .await;
-
-    (
-        StatusCode::OK,
-        HeaderMap::from_iter(map!{
-            header::CONTENT_TYPE =>
-            "application/octet-stream".parse().unwrap(),
-        }),
-        Body::from_stream(body),
-    )
-        .into_response()
-}
-```
-
 ## License & Feedback:
 
-> This library distributed under the [MIT](https://github.com/fuderis/atoman-rs/blob/main/LICENSE.md) license.
+> Distributed under the [MIT](https://github.com/fuderis/atoman-rs/blob/main/LICENSE.md) license.
 
 You can contact me via [GitHub](https://github.com/fuderis) or send a message to my [E-Mail](mailto:synapdrake@ya.ru).
 This library is actively evolving, and your suggestions and feedback are always welcome!

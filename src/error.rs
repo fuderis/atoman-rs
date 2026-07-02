@@ -18,11 +18,11 @@ pub enum Error {
     #[display = "Failed to read file: {0}"]
     ReadFile(std::io::Error),
 
-    #[cfg(feature = "stream")]
-    #[display = "Unexpected EOF with partial data"]
-    UnexpectedEOF,
+    #[cfg(feature = "channel")]
+    #[display = "Channel is already closed"]
+    ChannelClosed,
 
-    #[cfg(feature = "stream")]
-    #[display = "Stream channel is already closed"]
-    StreamClosed,
+    #[cfg(feature = "channel")]
+    #[display = "Channel is overflowed"]
+    ChannelFull,
 }

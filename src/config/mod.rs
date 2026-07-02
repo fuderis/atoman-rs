@@ -44,11 +44,11 @@ where
     pub async fn new<P: Into<PathBuf>>(file_path: P) -> Result<Self> {
         let file_path = file_path.into();
 
-        // reading the config file:
+        // reading the config file
         let this = if file_path.exists() {
             Self::read(&file_path).await?
         }
-        // writing the default config file:
+        // writing the default config file
         else {
             let mut this = Config::<T>::default();
             this.write(file_path).await?;
@@ -94,7 +94,7 @@ where
     pub async fn read<P: Into<PathBuf>>(file_path: P) -> Result<Self> {
         let file_path = file_path.into();
 
-        // reading the config file:
+        // reading the config file
         let contents = fs::read_to_string(&file_path).await?;
         Self::parse(file_path, &contents)
     }
@@ -103,7 +103,7 @@ where
     pub async fn write<P: Into<PathBuf>>(&mut self, file_path: P) -> Result<()> {
         self.path = file_path.into();
 
-        // serialize to .toml string:
+        // serialize to .toml string
         let contents = match self
             .path
             .extension()
@@ -121,12 +121,12 @@ where
             ext => return Err(Error::ConfigExt(ext.to_owned()).into()),
         };
 
-        // create dir:
+        // create dir
         if let Some(parent_dir) = self.path.parent() {
             fs::create_dir_all(parent_dir).await?;
         }
 
-        // write file:
+        // write file
         fs::write(&self.path, contents).await?;
 
         Ok(())
@@ -141,24 +141,24 @@ where
     pub async fn check(&self, millis: u64) -> Result<bool> {
         let interval = Duration::from_millis(millis);
 
-        // check last checked time (dirty method for quick access to the latest cached state):
+        // check last checked time (dirty method for quick access to the latest cached state)
         if let Some(time) = self.modify.dirty_get().checked
             && &time.elapsed() < &interval
         {
             return Ok(false);
         }
 
-        // locking state for update the instance:
+        // locking state for update the instance
         let mut guard = self.modify.lock().await;
 
-        // check again in case the another thread is already changed instance:
+        // check again in case the another thread is already changed instance
         if let Some(time) = guard.checked
             && &time.elapsed() < &interval
         {
             return Ok(false);
         }
 
-        // checking the actual file metadata:
+        // checking the actual file metadata
         let meta = fs::metadata(&self.path).await?;
         let modified: DateTime<Utc> = meta.modified()?.into();
 
@@ -168,7 +168,7 @@ where
             }
         }
 
-        // update the last checked time:
+        // update the last checked time
         guard.checked.replace(Instant::now());
 
         Ok(true)
@@ -176,7 +176,7 @@ where
 
     /// Updates the struct data from config file (returns true if updated)
     pub async fn update(&mut self) -> Result<bool> {
-        // read the actual file contents:
+        // read the actual file contents
         let cfg = Self::read(&self.path).await?;
         *self = cfg;
 

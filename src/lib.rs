@@ -26,10 +26,10 @@ pub mod trace;
 #[cfg(feature = "trace")]
 pub use trace::*;
 
-#[cfg(feature = "stream")]
-pub mod stream;
-#[cfg(feature = "stream")]
-pub use stream::*;
+#[cfg(feature = "channel")]
+pub mod channel;
+#[cfg(feature = "channel")]
+pub use channel::*;
 
 #[cfg(feature = "file")]
 pub mod file;
