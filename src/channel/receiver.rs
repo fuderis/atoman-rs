@@ -11,30 +11,38 @@ impl<T> Receiver<T> {
     /// Receives the next data from receiver
     pub async fn recv(&mut self) -> Result<Option<T>> {
         match self {
-            Self::Unbounded(rx) => Ok(rx
-                .recv()
-                .await
-                .map(|r| r.ok())
-                .ok_or(Error::ChannelClosed)?),
-            Self::Bounded(rx) => Ok(rx
-                .recv()
-                .await
-                .map(|r| r.ok())
-                .ok_or(Error::ChannelClosed)?),
+            Self::Unbounded(rx) => match rx.recv().await {
+                Some(Ok(item)) => Ok(Some(item)),
+                Some(Err(err)) => Err(err),
+                None => Ok(None),
+            },
+
+            Self::Bounded(rx) => match rx.recv().await {
+                Some(Ok(item)) => Ok(Some(item)),
+                Some(Err(err)) => Err(err),
+                None => Ok(None),
+            },
         }
     }
 
     /// Receives the next data from receiver
     pub fn try_recv(&mut self) -> Result<Option<T>> {
+        use tokio::sync::mpsc::error::TryRecvError;
+
         match self {
-            Self::Unbounded(rx) => Ok(rx
-                .try_recv()
-                .map(|r| r.ok())
-                .map_err(|_| Error::ChannelClosed)?),
-            Self::Bounded(rx) => Ok(rx
-                .try_recv()
-                .map(|r| r.ok())
-                .map_err(|_| Error::ChannelClosed)?),
+            Self::Unbounded(rx) => match rx.try_recv() {
+                Ok(Ok(item)) => Ok(Some(item)),
+                Ok(Err(err)) => Err(err),
+                Err(TryRecvError::Empty) => Ok(None),
+                Err(TryRecvError::Disconnected) => Ok(None),
+            },
+
+            Self::Bounded(rx) => match rx.try_recv() {
+                Ok(Ok(item)) => Ok(Some(item)),
+                Ok(Err(err)) => Err(err),
+                Err(TryRecvError::Empty) => Ok(None),
+                Err(TryRecvError::Disconnected) => Ok(None),
+            },
         }
     }
 
