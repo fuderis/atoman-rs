@@ -9,21 +9,8 @@ pub enum Sender<T> {
 }
 
 impl<T> Sender<T> {
-    /// Sends a data to receiver
-    pub async fn send(&self, item: impl Into<T>) -> Result<()> {
-        match self {
-            Self::Unbounded(tx) => tx
-                .send(Ok(item.into()))
-                .map_err(|_| Error::ChannelClosed.into()),
-            Self::Bounded(tx) => tx
-                .send(Ok(item.into()))
-                .await
-                .map_err(|_| Error::ChannelClosed.into()),
-        }
-    }
-
-    /// Tries to a send data to receiver
-    pub fn try_send(&self, item: impl Into<T>) -> Result<()> {
+    /// Sends a data to the receiver
+    pub fn send(&self, item: impl Into<T>) -> Result<()> {
         match self {
             Self::Unbounded(tx) => tx
                 .send(Ok(item.into()))
@@ -36,26 +23,41 @@ impl<T> Sender<T> {
         }
     }
 
-    /// Sends an error to receiver
-    pub async fn send_err(&self, error: DynError) -> Result<()> {
+    /// Tries to a send data to the receiver
+    pub async fn send_async(&self, item: impl Into<T>) -> Result<()> {
         match self {
-            Self::Unbounded(tx) => tx.send(Err(error)).map_err(|_| Error::ChannelClosed.into()),
+            Self::Unbounded(tx) => tx
+                .send(Ok(item.into()))
+                .map_err(|_| Error::ChannelClosed.into()),
             Self::Bounded(tx) => tx
-                .send(Err(error))
+                .send(Ok(item.into()))
                 .await
                 .map_err(|_| Error::ChannelClosed.into()),
         }
     }
 
-    /// Tries to send an error to receiver
-    pub fn try_send_err(&self, error: DynError) -> Result<()> {
+    /// Sends an error to receiver
+    pub fn send_err(&self, error: DynError) -> Result<()> {
         match self {
             Self::Unbounded(tx) => tx.send(Err(error)).map_err(|_| Error::ChannelClosed.into()),
+
             Self::Bounded(tx) => match tx.try_send(Err(error)) {
                 Ok(_) => Ok(()),
                 Err(TrySendError::Full(_)) => Err(Error::ChannelFull.into()),
                 Err(TrySendError::Closed(_)) => Err(Error::ChannelClosed.into()),
             },
+        }
+    }
+
+    /// Tries to send an error to receiver
+    pub async fn send_err_async(&self, error: DynError) -> Result<()> {
+        match self {
+            Self::Unbounded(tx) => tx.send(Err(error)).map_err(|_| Error::ChannelClosed.into()),
+
+            Self::Bounded(tx) => tx
+                .send(Err(error))
+                .await
+                .map_err(|_| Error::ChannelClosed.into()),
         }
     }
 
