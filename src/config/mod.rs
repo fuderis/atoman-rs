@@ -75,10 +75,12 @@ where
             .as_str()
         {
             #[cfg(any(feature = "toml-config"))]
-            "TOML" => toml::from_str(contents)?,
+            "TOML" => toml::from_str(contents).map_err(|e| Error::ParseConfig(Box::new(e)))?,
 
             #[cfg(any(feature = "json-config"))]
-            "JSON" => serde_json::from_str(contents)?,
+            "JSON" => {
+                serde_json::from_str(contents).map_err(|e| Error::ParseConfig(Box::new(e)))?
+            }
 
             ext => return Err(Error::ConfigExt(ext.to_owned()).into()),
         };

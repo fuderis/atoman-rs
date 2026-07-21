@@ -31,7 +31,7 @@ dependencies = [
 
 [[package]]
 name = "atoman"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "arc-swap",
  "bytes",
