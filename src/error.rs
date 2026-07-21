@@ -13,7 +13,7 @@ pub enum Error {
     ConfigExt(String),
 
     #[cfg(any(feature = "json-config", feature = "toml-config"))]
-    #[display = "Unsupported config extension '.{0}'."]
+    #[display = "Parse config error: {0}"]
     ParseConfig(DynError),
 
     #[cfg(feature = "trace")]
