@@ -68,6 +68,14 @@ impl<T> Sender<T> {
             Self::Bounded(tx) => tx.is_closed(),
         }
     }
+
+    /// Works until the connection is closed
+    pub async fn closed(&self) {
+        match self {
+            Self::Unbounded(tx) => tx.closed().await,
+            Self::Bounded(tx) => tx.closed().await,
+        }
+    }
 }
 
 impl<T> From<mpsc::UnboundedSender<Result<T>>> for Sender<T> {
