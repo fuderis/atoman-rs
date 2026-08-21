@@ -101,11 +101,11 @@ where
         Self::parse(file_path, &contents)
     }
 
-    /// Saves the config to custom file path
+    /// Saves the config to custom file path safely using a temp file
     pub async fn write<P: Into<PathBuf>>(&mut self, file_path: P) -> Result<()> {
         self.path = file_path.into();
 
-        // serialize to .toml string
+        // 1. Definition of extension and serialization
         let contents = match self
             .path
             .extension()
@@ -114,22 +114,46 @@ where
             .to_uppercase()
             .as_ref()
         {
-            #[cfg(any(feature = "toml-config"))]
+            #[cfg(feature = "toml-config")]
             "TOML" => toml::to_string_pretty(&self.data)?,
 
-            #[cfg(any(feature = "json-config"))]
+            #[cfg(feature = "json-config")]
             "JSON" => serde_json::to_string_pretty(&self.data)?,
 
             ext => return Err(Error::ConfigExt(ext.to_owned()).into()),
         };
 
-        // create dir
+        // 2. Creating the parent directory if it does not exist.
         if let Some(parent_dir) = self.path.parent() {
             fs::create_dir_all(parent_dir).await?;
         }
 
-        // write file
-        fs::write(&self.path, contents).await?;
+        // 3. Generating a path to a temporary file (e.g., config.toml.tmp)
+        let tmp_path = self.path.with_extension(format!(
+            "{}.tmp",
+            self.path.extension().and_then(|s| s.to_str()).unwrap_or("")
+        ));
+
+        // 4. Writing to a temporary file
+        fs::write(&tmp_path, &contents).await?;
+
+        // 5. (Optional) Forcing the OS buffers to be flushed to the physical disk (fsync)
+        // To ensure that the data is physically written before renaming
+        if let Ok(file) = fs::File::open(&tmp_path).await {
+            let _ = file.sync_all().await;
+        }
+
+        // 6. Atomic renaming: .tmp replaces the original file
+        if let Err(e) = fs::rename(&tmp_path, &self.path).await {
+            // If the renaming fails, we clean up the .tmp files.
+            let _ = fs::remove_file(&tmp_path).await;
+            return Err(e.into());
+        }
+
+        // 7. Update the metadata regarding the time of changes in memory.
+        let mut guard = self.modify.lock().await;
+        guard.modified = Some(Utc::now());
+        guard.checked = Some(Instant::now());
 
         Ok(())
     }
