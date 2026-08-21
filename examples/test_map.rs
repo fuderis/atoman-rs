@@ -26,31 +26,33 @@ impl UserSession {
     }
 }
 
-/// Глобальное хранилище сессий без `Lazy` обёрток
+/// Global session storage without `Lazy` wrappers
 static SESSIONS: Map<u64, UserSession> = Map::new();
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     const SESSIONS_COUNT: u64 = 100;
 
-    println!("⚡ Инициализация {} активных сессий...", SESSIONS_COUNT);
+    println!("Initializing {} active sessions...", SESSIONS_COUNT);
 
-    // 1. Создаём сессии для пользователей
+    // 1. Create sessions for users
     for user_id in 0..SESSIONS_COUNT {
-        SESSIONS.insert(user_id, UserSession::new(format!("token_sess_{user_id}")));
+        SESSIONS
+            .insert(user_id, UserSession::new(format!("token_sess_{user_id}")))
+            .await;
     }
 
     let start_time = Instant::now();
-    println!("🚀 Эмуляция параллельной активности пользователей...");
+    println!("Simulating concurrent user activity...");
 
-    // 2. Эмулируем 100 одновременно пришедших запросов
+    // 2. Simulate 100 incoming requests simultaneously
     let mut tasks = Vec::with_capacity(SESSIONS_COUNT as usize);
 
     for user_id in 0..SESSIONS_COUNT {
         let task = tokio::spawn(async move {
-            // Обновляем сессию конкретного пользователя
+            // Update session for a specific user
             if let Some(mut session) = SESSIONS.write(&user_id).await {
-                // Имитируем задержку обработки запроса (10 мс)
+                // Simulate request processing delay (10 ms)
                 sleep(Duration::from_millis(10)).await;
 
                 session.actions_count += 1;
@@ -60,24 +62,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         tasks.push(task);
     }
 
-    // 3. Ждём завершения всех асинхронных тасок
+    // 3. Wait for all asynchronous tasks to complete
     for task in tasks {
         task.await?;
     }
 
     let elapsed = start_time.elapsed();
-    println!("✅ Все сессии обновлены за: {:?}", elapsed);
+    println!("All sessions updated in: {:?}", elapsed);
 
-    // 4. Валидация: проверяем, что все сессии корректно обновились
+    // 4. Validation: check that all sessions were updated correctly
     for user_id in 0..SESSIONS_COUNT {
-        let session = SESSIONS
-            .read(&user_id)
-            .await
-            .expect("Сессия должна существовать");
+        let session = SESSIONS.read(&user_id).await.expect("Session should exist");
         assert_eq!(session.actions_count, 1);
         assert_eq!(session.token, format!("token_sess_{user_id}"));
     }
 
-    println!("🎉 Проверка пройдена: сессии абсолютно независимы и не блокируют друг друга!");
+    println!("Check passed: sessions are completely independent and do not block each other!");
     Ok(())
 }
