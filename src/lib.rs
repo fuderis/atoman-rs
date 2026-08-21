@@ -5,8 +5,12 @@ pub mod prelude;
 
 pub mod flag;
 pub use flag::Flag;
+
 pub mod state;
 pub use state::{State, StateGuard};
+
+pub mod map;
+pub use map::{Map, MapGuard, MapGuardMut};
 
 pub use arc_swap::{self, ArcSwap, ArcSwapAny};
 pub use once_cell::{self, sync::Lazy};
