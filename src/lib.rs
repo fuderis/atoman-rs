@@ -18,6 +18,8 @@ pub use once_cell::{self, sync::Lazy};
 #[cfg(any(feature = "json-config", feature = "toml-config"))]
 pub mod config;
 #[cfg(any(feature = "json-config", feature = "toml-config"))]
+pub use atoman_config::config;
+#[cfg(any(feature = "json-config", feature = "toml-config"))]
 pub use config::*;
 
 #[cfg(feature = "logger")]

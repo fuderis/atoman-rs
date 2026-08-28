@@ -1,32 +1,47 @@
 #![cfg(feature = "config")]
-use atoman::Config;
 use serde::{Deserialize, Serialize};
+
+#[atoman::config]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Options {
+    pub name: String,
+    pub age: u32,
+}
+
+impl ::std::default::Default for Options {
+    fn default() -> Self {
+        Self {
+            name: "Bob".to_owned(),
+            age: 23,
+        }
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    struct Person {
-        name: String,
-        age: u32,
+    // initialize the global config using the auto‑generated init() method.
+    Options::init("options.toml").await?;
+
+    // printing the data
+    println!("{:?}", Options::get());
+
+    // access to fields via Deref from Arc<Config<T>>
+    assert_eq!(Options::get().name, "Bob");
+    assert_eq!(Options::get().age, 23);
+
+    // modify the data using the asynchronous StateGuard lock.
+    {
+        let mut cfg = Options::lock().await;
+        cfg.age = 24;
+        cfg.save().await?; // write it atomically to the disk.
     }
 
-    impl ::std::default::Default for Person {
-        fn default() -> Self {
-            Self {
-                name: "Bob".to_owned(),
-                age: 23,
-            }
-        }
-    }
+    // checking the updated value
+    assert_eq!(Options::get().age, 24);
 
-    let mut cfg = Config::<Person>::new(".test/person.toml").await?;
-    println!("{cfg:?}");
+    // get the current path to the configuration file.
+    println!("Config path: {:?}", Options::path());
 
-    assert_eq!(cfg.name, "Bob");
-    assert_eq!(cfg.age, 23);
-
-    cfg.age = 24;
-    assert_eq!(cfg.age, 24);
-
+    tokio::fs::remove_file("options.toml").await?;
     Ok(())
 }
