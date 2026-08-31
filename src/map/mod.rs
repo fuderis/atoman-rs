@@ -13,7 +13,7 @@ pub const SHARDS_COUNT: usize = 64;
 
 /// A single shard wrapping a thread-safe hash map protected by a reader-writer lock.
 pub(crate) struct Shard<K: Eq + Hash + 'static, V> {
-    map: RwLock<HashMap<K, Arc<RwLock<V>>>>,
+    map: RwLock<HashMap<Arc<K>, Arc<RwLock<V>>>>,
 }
 
 /// Inner container holding the fixed-size array of shards.
@@ -26,10 +26,8 @@ pub struct Map<K: Eq + Hash + 'static, V: 'static> {
     inner: OnceCell<Arc<MapInner<K, V>>>,
 }
 
-impl<K: Eq + Hash + Clone + 'static, V: 'static> Map<K, V> {
+impl<K: Eq + Hash + 'static, V: 'static> Map<K, V> {
     /// Creates a new, uninitialized sharded map.
-    ///
-    /// Suitable for use in `const` contexts such as `static` declarations.
     pub const fn new() -> Self {
         Self {
             inner: OnceCell::new(),
@@ -60,9 +58,11 @@ impl<K: Eq + Hash + Clone + 'static, V: 'static> Map<K, V> {
         let inner = self.get_or_init();
         let shard = self.get_shard(inner, &key);
 
+        let key_arc = Arc::new(key);
         let item = Arc::new(RwLock::new(value));
+
         let mut guard = shard.map.write().await;
-        guard.insert(key, item);
+        guard.insert(key_arc, item);
     }
 
     /// Removes a key from the map asynchronously and returns the removed value wrapped in an [`Arc<RwLock<V>>`].
@@ -75,9 +75,6 @@ impl<K: Eq + Hash + Clone + 'static, V: 'static> Map<K, V> {
     }
 
     /// Fetches a read-only guard for the value corresponding to the given key asynchronously.
-    ///
-    /// The shard lock is released as soon as the inner item reference is cloned,
-    /// keeping other keys in the same shard accessible.
     pub async fn read(&self, key: &K) -> Option<MapGuard<V>> {
         let inner = self.get_or_init();
         let item = {
@@ -86,8 +83,6 @@ impl<K: Eq + Hash + Clone + 'static, V: 'static> Map<K, V> {
             guard.get(key).cloned()?
         };
 
-        // acquire owned guard asynchronously.
-        // reading from shard.map is complete, shard is unlocked for other keys!
         let guard = item.read_owned().await;
         Some(MapGuard { guard })
     }
@@ -95,22 +90,83 @@ impl<K: Eq + Hash + Clone + 'static, V: 'static> Map<K, V> {
     /// Fetches a mutable write guard for the value corresponding to the given key asynchronously.
     pub async fn write(&self, key: &K) -> Option<MapGuardMut<V>> {
         let inner = self.get_or_init();
-
-        // check key existence under the shard's read lock
         let item = {
             let shard = self.get_shard(inner, key);
             let guard = shard.map.read().await;
             guard.get(key).cloned()?
         };
 
-        // acquire value's write guard asynchronously
         let guard = item.write_owned().await;
         Some(MapGuardMut { guard })
     }
+
+    /// Searches for an entry matching the predicate `f`.
+    /// Passes `Arc<K>` and `MapGuard<V>` to the predicate.
+    pub async fn find<F, Fut>(&self, f: F) -> Option<(Arc<K>, Arc<RwLock<V>>)>
+    where
+        F: Fn(&Arc<K>, MapGuard<V>) -> Fut,
+        Fut: std::future::Future<Output = bool>,
+    {
+        let inner = self.inner.get()?;
+
+        for shard in &inner.shards {
+            let items: Vec<_> = {
+                let guard = shard.map.read().await;
+                guard
+                    .iter()
+                    .map(|(k, v)| (Arc::clone(k), Arc::clone(v)))
+                    .collect()
+            };
+
+            for (key, arc_lock) in items {
+                let guard = arc_lock.clone().read_owned().await;
+                if f(&key, MapGuard { guard }).await {
+                    return Some((key, arc_lock));
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Collects all items and returns as `HashMap<Arc<K>, Arc<RwLock<V>>>`.
+    pub async fn to_hash(&self) -> HashMap<Arc<K>, Arc<RwLock<V>>> {
+        let Some(inner) = self.inner.get() else {
+            return HashMap::new();
+        };
+
+        let mut items = HashMap::with_capacity(self.len().await);
+        for shard in &inner.shards {
+            let guard = shard.map.read().await;
+            for (k, v) in guard.iter() {
+                items.insert(Arc::clone(k), Arc::clone(v));
+            }
+        }
+
+        items
+    }
+
+    /// Returns the total number of key-value pairs stored across all shards.
+    pub async fn len(&self) -> usize {
+        let Some(inner) = self.inner.get() else {
+            return 0;
+        };
+
+        let mut total = 0;
+        for shard in &inner.shards {
+            let guard = shard.map.read().await;
+            total += guard.len();
+        }
+        total
+    }
+
+    /// Returns `true` if the map contains no elements.
+    pub async fn is_empty(&self) -> bool {
+        self.len().await == 0
+    }
 }
 
-impl<K: Eq + Hash + Clone, V: 'static> Default for Map<K, V> {
-    /// Creates a new map instance with default configuration.
+impl<K: Eq + Hash + 'static, V: 'static> Default for Map<K, V> {
     fn default() -> Self {
         Self::new()
     }
