@@ -29,7 +29,7 @@ impl Modify {
 /// The atomic config wrapper
 #[derive(Default, Clone)]
 pub struct Config<
-    T: Default + Debugging + Clone + Serialize + DeserializeOwned + Send + Sync + 'static,
+    T: Default + std::fmt::Debug + Clone + Serialize + DeserializeOwned + Send + Sync + 'static,
 > {
     path: PathBuf,
     data: T,
@@ -38,7 +38,7 @@ pub struct Config<
 
 impl<T> Config<T>
 where
-    T: Clone + Default + Debugging + Serialize + DeserializeOwned + Send + Sync + 'static,
+    T: Clone + Default + std::fmt::Debug + Serialize + DeserializeOwned + Send + Sync + 'static,
 {
     /// Reads the config file or creates the default
     pub async fn new<P: Into<PathBuf>>(file_path: P) -> Result<Self> {
@@ -212,7 +212,7 @@ where
 
 impl<T> ::std::ops::Deref for Config<T>
 where
-    T: Clone + Default + Debugging + Serialize + DeserializeOwned + Send + Sync + 'static,
+    T: Clone + Default + std::fmt::Debug + Serialize + DeserializeOwned + Send + Sync + 'static,
 {
     type Target = T;
 
@@ -223,7 +223,7 @@ where
 
 impl<T> ::std::ops::DerefMut for Config<T>
 where
-    T: Clone + Default + Debugging + Serialize + DeserializeOwned + Send + Sync + 'static,
+    T: Clone + Default + std::fmt::Debug + Serialize + DeserializeOwned + Send + Sync + 'static,
 {
     fn deref_mut(&mut self) -> &mut T {
         &mut self.data
@@ -232,7 +232,7 @@ where
 
 impl<T> ::std::fmt::Debug for Config<T>
 where
-    T: Clone + Default + Debugging + Serialize + DeserializeOwned + Send + Sync + 'static,
+    T: Clone + Default + std::fmt::Debug + Serialize + DeserializeOwned + Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
         write!(f, "{:?}", &self.data)
@@ -244,7 +244,7 @@ where
     T: Clone
         + Default
         + std::fmt::Display
-        + Debugging
+        + std::fmt::Debug
         + Serialize
         + DeserializeOwned
         + Send
@@ -256,8 +256,9 @@ where
     }
 }
 
-impl<T: Clone + Default + Debugging + Serialize + DeserializeOwned + Eq + Send + Sync + 'static>
-    ::std::cmp::Eq for Config<T>
+impl<
+    T: Clone + Default + std::fmt::Debug + Serialize + DeserializeOwned + Eq + Send + Sync + 'static,
+> ::std::cmp::Eq for Config<T>
 {
 }
 
@@ -265,7 +266,7 @@ impl<T> ::std::cmp::PartialEq for Config<T>
 where
     T: Clone
         + Default
-        + Debugging
+        + std::fmt::Debug
         + Serialize
         + DeserializeOwned
         + PartialEq
@@ -280,7 +281,7 @@ where
 
 impl<T> ::std::convert::From<T> for Config<T>
 where
-    T: Clone + Default + Debugging + Serialize + DeserializeOwned + Send + Sync + 'static,
+    T: Clone + Default + std::fmt::Debug + Serialize + DeserializeOwned + Send + Sync + 'static,
 {
     fn from(value: T) -> Self {
         Self {

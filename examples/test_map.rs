@@ -1,4 +1,4 @@
-use atoman::Map;
+use atoman::SharedMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::time::{Duration, Instant, sleep};
 
@@ -27,7 +27,7 @@ impl UserSession {
 }
 
 /// Global session storage without `Lazy` wrappers
-static SESSIONS: Map<u64, UserSession> = Map::new();
+static SESSIONS: SharedMap<u64, UserSession> = SharedMap::new();
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
