@@ -99,16 +99,13 @@ impl<T: Clone + Send + Sync + 'static> Clone for State<T> {
 
 impl<T: Default + Clone + Send + Sync + 'static> State<T> {
     pub const fn default() -> Self {
-        Self {
-            wrap: OnceCell::new(),
-            init_fn: T::default,
-        }
+        Self::new(T::default)
     }
 }
 
 impl<T: Default + Clone + Send + Sync> Default for State<T> {
     fn default() -> Self {
-        Self::default()
+        Self::new(T::default)
     }
 }
 
