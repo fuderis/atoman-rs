@@ -27,28 +27,27 @@ and synchronous (threads/blocking code) contexts without deadlocks or runtime co
 
 ### Atomic Flag
 ```rust
-use atoman::prelude::*;
+use atoman::Flag;
 
-static IS_ACTIVE: Flag = Flag::new();
+static STATUS: Flag = Flag::new(false);
 
-#[tokio::main]
-async fn main() {
-    assert!(!IS_ACTIVE.is_locked());
+fn main() {
+    assert!(!STATUS.is_disabled());
 
-    IS_ACTIVE.lock().await;
-    assert!(IS_ACTIVE.is_locked());
+    STATUS.enable();
+    assert!(STATUS.is_enabled());
 
-    IS_ACTIVE.unlock();
-    assert!(!IS_ACTIVE.is_locked());
+    STATUS.disable();
+    assert!(STATUS.is_disabled());
 
-    IS_ACTIVE.blocking_lock();
-    assert!(IS_ACTIVE.is_locked());
+    STATUS.set(true);
+    assert!(STATUS.is_enabled());
 }
 ```
 
 ### Atomic State
 ```rust
-use atoman::prelude::*;
+use atoman::State;
 
 static CONFIG: State<Config> = State::new(|| 10);
 
@@ -59,16 +58,16 @@ pub struct Config {
 
 #[tokio::main]
 async fn main() {
-    assert_eq!(CONFIG.get().await.count, 10);
-
-    CONFIG.blocking_set(Config { count: 15 });
-    assert_eq!(CONFIG.blocking_get().count, 15);
-
-    CONFIG.dirty_set(Config { count: 20 });
-    assert_eq!(CONFIG.dirty_get().count, 20);
+    assert_eq!(CONFIG.get().count, 10);
 
     CONFIG.lock().await.count = 30;
-    assert_eq!(CONFIG.get().await.count, 30);
+    assert_eq!(CONFIG.get().count, 30);
+
+    CONFIG.set(Config { count: 20 }).await;
+    assert_eq!(CONFIG.get().count, 20);
+
+    CONFIG.blocking_set(Config { count: 15 });
+    assert_eq!(CONFIG.get().count, 15);
 }
 ```
 
@@ -97,7 +96,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
 ### Config [feature `config`]
 ```rust
-use atoman::{Config};
+use atoman::Config;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct Person {

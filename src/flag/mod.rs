@@ -1,120 +1,134 @@
-use crate::prelude::*;
-use std::time::{Duration, Instant};
+pub mod guard;
+pub use guard::FlagGuard;
 
-/// The atomic flag wrapper
-#[derive(Clone)]
-pub struct FlagWrap {
-    state: Arc<AtomicBool>,
-    notify: Arc<Notify>,
-}
+use std::{
+    ops::Deref,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
-/// The atomic flag for concurrent locks
+/// Light-weight atomic flag.
+#[derive(Debug)]
 pub struct Flag {
-    wrap: Lazy<Arc<FlagWrap>>,
+    state: AtomicBool,
 }
 
 impl Flag {
-    /// Creates a new flag
-    pub const fn new() -> Self {
+    /// Creates new atomic flag.
+    pub const fn new(initial: bool) -> Self {
         Self {
-            wrap: Lazy::new(|| {
-                Arc::new(FlagWrap {
-                    state: Arc::new(AtomicBool::new(false)),
-                    notify: Arc::new(Notify::new()),
-                })
-            }),
+            state: AtomicBool::new(initial),
         }
     }
 
-    /// Returns true if flag is locked
-    pub fn is_locked(&self) -> bool {
-        self.wrap.state.load(Ordering::Acquire)
+    /// Enables flag (sets to true).
+    #[inline]
+    pub fn enable(&self) -> bool {
+        self.state.swap(true, Ordering::AcqRel)
     }
 
-    /// Try to lock capture without waiting
-    /// (returns `true` if flag successfully locked)
-    pub fn try_lock(&self) -> bool {
-        self.wrap
-            .state
-            .compare_exchange(
-                false, // wait for unlock
-                true,  // locking
-                Ordering::Acquire,
-                Ordering::Relaxed,
-            )
-            .is_ok()
+    /// Disables flag (sets to false).
+    #[inline]
+    pub fn disable(&self) -> bool {
+        self.state.swap(false, Ordering::AcqRel)
     }
 
-    /// Releases the lock and notify the waiting threads/tasks
-    pub fn unlock(&self) {
-        self.wrap.state.store(false, Ordering::Release);
-        self.wrap.notify.notify_waiters();
+    /// Toggles flag (from true to false, or vice versa).
+    #[inline]
+    pub fn toggle(&self) -> bool {
+        self.state.fetch_xor(true, Ordering::AcqRel)
     }
 
-    /// Asynchronously waits for the release and capture the lock
-    pub async fn lock(&self) {
-        while !self.try_lock() {
-            self.wrap.notify.notified().await;
-        }
+    /// Sets flag boolean (manual).
+    #[inline]
+    pub fn set(&self, value: bool) {
+        self.state.store(value, Ordering::Release);
     }
 
-    /// Synchronously blocks the thread until the lock is released and captured
-    pub fn blocking_lock(&self) {
-        while !self.try_lock() {
-            std::thread::sleep(Duration::from_micros(50));
-        }
+    /// Returns true if enabled.
+    #[inline]
+    pub fn is_enabled(&self) -> bool {
+        self.state.load(Ordering::Acquire)
     }
 
-    /// Synchronously waits for lock capture with timeout
-    /// (returns `true` if lock successfully captured)
-    pub fn blocking_lock_timeout(&self, timeout: Duration) -> bool {
-        let deadline = Instant::now() + timeout;
+    /// Returns true if disabled.
+    #[inline]
+    pub fn is_disabled(&self) -> bool {
+        !self.is_enabled()
+    }
 
-        while !self.try_lock() {
-            if Instant::now() > deadline {
-                return false; // timeout
-            }
-            std::thread::sleep(Duration::from_micros(50));
-        }
-        true
+    /// Enables flag and disables on drop.
+    pub fn guard(&self) -> FlagGuard<'_> {
+        self.enable();
+        FlagGuard { flag: self }
     }
 }
 
-impl ::std::default::Default for Flag {
-    fn default() -> Self {
-        Self::new()
+impl Deref for Flag {
+    type Target = bool;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        if self.is_enabled() { &true } else { &false }
     }
 }
 
-impl ::std::fmt::Debug for Flag {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-        write!(f, "{:?}", &self.is_locked())
-    }
-}
+impl Eq for Flag {}
 
-impl ::std::fmt::Display for Flag {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-        write!(f, "{}", &self.is_locked())
-    }
-}
-
-impl ::std::cmp::Eq for Flag {}
-
-impl ::std::cmp::PartialEq for Flag {
+impl PartialEq for Flag {
+    #[inline]
     fn eq(&self, other: &Self) -> bool {
-        self.is_locked() == other.is_locked()
+        self.is_enabled() == other.is_enabled()
     }
 }
 
-impl ::std::cmp::PartialEq<bool> for Flag {
+impl PartialEq<bool> for Flag {
+    #[inline]
     fn eq(&self, other: &bool) -> bool {
-        &self.is_locked() == other
+        self.is_enabled() == *other
     }
 }
 
-#[allow(clippy::from_over_into)]
-impl ::std::convert::Into<bool> for Flag {
-    fn into(self) -> bool {
-        self.is_locked()
+impl PartialEq<Flag> for bool {
+    #[inline]
+    fn eq(&self, other: &Flag) -> bool {
+        *self == other.is_enabled()
+    }
+}
+
+impl PartialOrd for Flag {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.is_enabled().partial_cmp(&other.is_enabled())
+    }
+}
+
+impl PartialOrd<bool> for Flag {
+    #[inline]
+    fn partial_cmp(&self, other: &bool) -> Option<std::cmp::Ordering> {
+        self.is_enabled().partial_cmp(other)
+    }
+}
+
+impl std::fmt::Display for Flag {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.is_enabled())
+    }
+}
+
+impl Default for Flag {
+    fn default() -> Self {
+        Self::new(false)
+    }
+}
+
+impl From<bool> for Flag {
+    fn from(value: bool) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<&Flag> for bool {
+    fn from(flag: &Flag) -> Self {
+        flag.is_enabled()
     }
 }

@@ -17,7 +17,7 @@ use tokio::{
 
 const BUFFER_SIZE: usize = 500_000;
 static CURRENT_LEVEL: AtomicU8 = AtomicU8::new(3);
-static LOGGER_STATE: State<LoggerState> = State::default();
+static LOGGER_STATE: State<LoggerState> = State::new(|| Default::default());
 
 /// The log command
 enum LogCmd {
@@ -44,7 +44,7 @@ pub struct Logger {
 impl Logger {
     /// Returns the current .log file path
     pub fn path() -> Option<PathBuf> {
-        LOGGER_STATE.get_dirty().path.clone()
+        LOGGER_STATE.get().path.clone()
     }
 
     /// Returns the current log level
@@ -125,7 +125,7 @@ impl Logger {
 
     /// Forced push of the worker buffer to disk
     pub async fn flush() {
-        let tx = LOGGER_STATE.get_dirty().tx.clone();
+        let tx = LOGGER_STATE.get().tx.clone();
         if let Some(tx) = tx {
             let (tx_signal, rx_signal) = oneshot::channel();
             if tx.send(LogCmd::Flush(tx_signal)).await.is_ok() {
@@ -136,7 +136,7 @@ impl Logger {
 
     /// Traces the all logs in current file by filter
     pub async fn trace(filters: &[String]) -> Result<String> {
-        let Some(file_path) = LOGGER_STATE.get_dirty().path.clone() else {
+        let Some(file_path) = LOGGER_STATE.get().path.clone() else {
             return Err("Log file path is missing".into());
         };
 
@@ -300,7 +300,7 @@ async fn worker(mut rx: mpsc::Receiver<LogCmd>) {
                     }
                 }
 
-                let path = &LOGGER_STATE.get_dirty().path;
+                let path = &LOGGER_STATE.get().path;
                 let Some(current_path) = path else {
                     continue;
                 };

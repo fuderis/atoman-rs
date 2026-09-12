@@ -1,12 +1,11 @@
+use arc_swap::ArcSwapAny;
 use std::sync::Arc;
-use tokio::sync::OwnedRwLockWriteGuard;
-
-use super::StateWrap;
+use tokio::sync::OwnedMutexGuard;
 
 /// Guard transaction for state changes.
 pub struct StateGuard<T: Clone + Send + Sync + 'static> {
-    pub(super) _write_guard: OwnedRwLockWriteGuard<Arc<T>>,
-    pub(super) wrap: Arc<StateWrap<T>>,
+    pub(super) _guard: OwnedMutexGuard<()>,
+    pub(super) swap: Arc<ArcSwapAny<Arc<T>>>,
     pub(super) data: T,
     pub(super) counter: usize,
 }
@@ -15,7 +14,7 @@ impl<T: Clone + Send + Sync + 'static> StateGuard<T> {
     /// Synchronizes changes in `ArcSwap`.
     pub fn sync(&mut self) {
         let data = Arc::new(self.data.clone());
-        self.wrap.swap.store(data);
+        self.swap.store(data);
     }
 
     /// Synchronizes data only on every N‑th call.

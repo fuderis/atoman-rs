@@ -4,25 +4,39 @@ pub use guard::StateGuard;
 use arc_swap::ArcSwapAny;
 use once_cell::sync::OnceCell;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::Mutex;
 
 /// Internal state wrapper.
 ///
-/// `RwLock<Arc<T>>` protects the modification process,
+/// `Mutex<Arc<T>>` protects the modification process,
 /// while `ArcSwapAny` provides instant lock‑free reading (lock‑free read).
+#[derive(Clone)]
 pub struct StateWrap<T: Clone + Send + Sync> {
-    lock: Arc<RwLock<Arc<T>>>,
-    swap: ArcSwapAny<Arc<T>>,
+    mutex: Arc<Mutex<()>>,
+    swap: Arc<ArcSwapAny<Arc<T>>>,
 }
 
-/// Atomic shared state with lock-free reading via `ArcSwap`
+/// Atomic shared state with lock-free reading via `ArcSwap`.
 pub struct State<T: Clone + Send + Sync + 'static> {
-    wrap: OnceCell<Arc<StateWrap<T>>>,
+    wrap: OnceCell<StateWrap<T>>,
     init_fn: fn() -> T,
 }
 
 impl<T: Clone + Send + Sync> State<T> {
-    /// Creates new state with custom initializator
+    /// Lazy initialization on first access.
+    fn get_or_init(&self) -> &StateWrap<T> {
+        self.wrap.get_or_init(|| {
+            let value = Arc::new((self.init_fn)());
+            StateWrap {
+                mutex: Arc::new(Mutex::new(())),
+                swap: Arc::new(ArcSwapAny::from(value)),
+            }
+        })
+    }
+}
+
+impl<T: Clone + Send + Sync> State<T> {
+    /// Creates new state with custom initializator.
     pub const fn new(init_fn: fn() -> T) -> Self {
         Self {
             wrap: OnceCell::new(),
@@ -30,106 +44,42 @@ impl<T: Clone + Send + Sync> State<T> {
         }
     }
 
-    /// Lazy initialization on first access
-    fn get_or_init(&self) -> &Arc<StateWrap<T>> {
-        self.wrap.get_or_init(|| {
-            let initial_value = Arc::new((self.init_fn)());
-            Arc::new(StateWrap {
-                lock: Arc::new(RwLock::new(initial_value.clone())),
-                swap: ArcSwapAny::from(initial_value),
-            })
-        })
-    }
-
-    /// Returns state guard asynchronously
+    /// Returns state guard asynchronously.
     pub async fn lock(&self) -> StateGuard<T> {
         let wrap = self.get_or_init().clone();
-        let lock_arc = wrap.lock.clone();
-        let write_guard = lock_arc.write_owned().await;
 
         StateGuard {
-            _write_guard: write_guard,
-            wrap,
-            data: self.get_dirty_cloned(),
+            _guard: wrap.mutex.lock_owned().await,
+            swap: wrap.swap.clone(),
+            data: (*wrap.swap.load_full()).clone(),
             counter: 0,
         }
     }
 
-    // /// Returns state guard synchronously (blocking current thread)
-    // pub fn blocking_lock(&self) -> StateGuard<T> {
-    //     let wrap = self.get_or_init().clone();
-    //     let lock_arc = wrap.lock.clone();
-    //     // Передаем Arc напрямую (без разыменования *), чтобы вызывать метод self: Arc<Self>
-    //     let write_guard = RwLock::blocking_write_owned(lock_arc);
-
-    //     StateGuard {
-    //         _write_guard: write_guard,
-    //         wrap,
-    //         data: self.get_dirty_cloned(),
-    //         counter: 0,
-    //     }
-    // }
-
-    /// Returns state value (wait until active write transaction finishes)
-    pub async fn get(&self) -> Arc<T> {
+    /// Sets new value to state asynchronously.
+    pub async fn set(&self, value: T) {
         let wrap = self.get_or_init();
-        let _read_guard = wrap.lock.read().await;
-        wrap.swap.load_full()
+        let _ = wrap.mutex.lock().await;
+        wrap.swap.store(Arc::new(value));
     }
 
-    /// Returns state value synchronously (blocking until write finishes)
-    pub fn blocking_get(&self) -> Arc<T> {
+    /// Sets new value to state synchronously.
+    pub fn blocking_set(&self, value: T) {
         let wrap = self.get_or_init();
-        let _read_guard = wrap.lock.blocking_read();
-        wrap.swap.load_full()
+        let _ = wrap.mutex.blocking_lock();
+        wrap.swap.store(Arc::new(value));
     }
 
-    /// Returns state value instantly without checking locks (Lock-free)
+    /// Returns state value instantly without checking locks (Lock-free).
     #[inline]
-    pub fn get_dirty(&self) -> Arc<T> {
+    pub fn get(&self) -> Arc<T> {
         self.get_or_init().swap.load_full()
     }
 
-    /// Returns clone of state value (wait until active write finishes)
-    pub async fn get_cloned(&self) -> T {
-        self.get().await.as_ref().clone()
-    }
-
-    /// Returns clone of state value synchronously
-    pub fn blocking_get_cloned(&self) -> T {
-        self.blocking_get().as_ref().clone()
-    }
-
-    /// Returns clone of state value instantly without locks
+    /// Returns clone of state value instantly without locks.
     #[inline]
-    pub fn get_dirty_cloned(&self) -> T {
-        self.get_dirty().as_ref().clone()
-    }
-
-    /// Sets new value to state asynchronously
-    pub async fn set(&self, value: T) {
-        let wrap = self.get_or_init();
-        let mut write_guard = wrap.lock.write().await;
-
-        let new_data = Arc::new(value);
-        *write_guard = new_data.clone();
-        wrap.swap.store(new_data);
-    }
-
-    /// Sets new value to state synchronously
-    pub fn blocking_set(&self, value: T) {
-        let wrap = self.get_or_init();
-        let mut write_guard = wrap.lock.blocking_write();
-
-        let new_data = Arc::new(value);
-        *write_guard = new_data.clone();
-        wrap.swap.store(new_data);
-    }
-
-    /// Sets new value without acquiring a lock (unsafe for concurrency)
-    pub fn set_dirty(&self, value: T) {
-        let new_data = Arc::new(value);
-        self.get_or_init().swap.store(new_data);
+    pub fn get_cloned(&self) -> T {
+        self.get().as_ref().clone()
     }
 }
 
@@ -138,7 +88,7 @@ impl<T: Clone + Send + Sync + 'static> Clone for State<T> {
         let wrap = self.get_or_init();
 
         let new_wrap = OnceCell::new();
-        let _ = new_wrap.set(Arc::clone(wrap));
+        let _ = new_wrap.set(wrap.clone());
 
         Self {
             wrap: new_wrap,
@@ -162,22 +112,31 @@ impl<T: Default + Clone + Send + Sync> Default for State<T> {
     }
 }
 
-impl<T: Default + Clone + Send + Sync> From<T> for State<T> {
-    fn from(data: T) -> Self {
-        let this = Self::default();
-        this.set_dirty(data);
-        this
+impl<T: Clone + Send + Sync + 'static> From<T> for State<T> {
+    fn from(value: T) -> Self {
+        let wrap = StateWrap {
+            mutex: Arc::new(Mutex::new(())),
+            swap: Arc::new(ArcSwapAny::from(Arc::new(value))),
+        };
+
+        let once = OnceCell::new();
+        let _ = once.set(wrap);
+
+        Self {
+            wrap: once,
+            init_fn: || unreachable!("State initialised via From<T>"),
+        }
     }
 }
 
 impl<T: Clone + Send + Sync + std::fmt::Debug> std::fmt::Debug for State<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", &self.get_dirty())
+        write!(f, "{:?}", &self.get())
     }
 }
 
 impl<T: Clone + Send + Sync + std::fmt::Display> std::fmt::Display for State<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", &self.get_dirty())
+        write!(f, "{}", &self.get())
     }
 }
