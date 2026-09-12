@@ -47,7 +47,7 @@ pub fn config(_attr: TokenStream, item: TokenStream) -> TokenStream {
             }
 
             /// Returns config state guard
-            pub async fn lock() -> atoman::StateGuard<'static, atoman::Config<#struct_name>> {
+            pub async fn lock() -> atoman::StateGuard<atoman::Config<#struct_name>> {
                 #static_ident.lock().await
             }
 
