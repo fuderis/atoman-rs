@@ -33,17 +33,17 @@ pub fn config(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
             /// Returns config file path
             pub fn path() -> ::std::path::PathBuf {
-                #static_ident.get_dirty().path().clone()
+                #static_ident.get().path().clone()
             }
 
             /// Returns global config instance (zero-copy reference)
             pub fn get() -> ::std::sync::Arc<atoman::Config<#struct_name>> {
-                #static_ident.get_dirty()
+                #static_ident.get()
             }
 
             /// Returns global config instance (guaranteed to be relevant)
             pub async fn get_actual() -> ::std::sync::Arc<atoman::Config<#struct_name>> {
-                #static_ident.get().await
+                #static_ident.get()
             }
 
             /// Returns config state guard
@@ -53,7 +53,7 @@ pub fn config(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
             /// Returns actual config file data
             pub async fn read() -> ::std::result::Result<atoman::Config<#struct_name>, Box<dyn ::std::error::Error + Send + Sync>> {
-                let path = #static_ident.get_dirty().path().clone();
+                let path = #static_ident.get().path().clone();
                 atoman::Config::<#struct_name>::read(path).await
             }
 
