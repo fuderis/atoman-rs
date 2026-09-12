@@ -66,7 +66,7 @@ dependencies = [
 
 [[package]]
 name = "atoman"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "ahash",
  "arc-swap",
@@ -89,9 +89,9 @@ dependencies = [
 
 [[package]]
 name = "atoman-config"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46744222c2f7ff99bdb2d261c0294b1c2853d1ac23880c258e2c19f1df158ba3"
+checksum = "ea4d94a918042d56d84aa255a11bca91108a3f9fd1af210fb91cce28bcc4a7aa"
 dependencies = [
  "heck 0.4.1",
  "proc-macro2",
