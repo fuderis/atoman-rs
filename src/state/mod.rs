@@ -11,7 +11,7 @@ use tokio::sync::RwLock;
 /// `RwLock<Arc<T>>` protects the modification process,
 /// while `ArcSwapAny` provides instant lock‑free reading (lock‑free read).
 pub struct StateWrap<T: Clone + Send + Sync> {
-    lock: RwLock<Arc<T>>,
+    lock: Arc<RwLock<Arc<T>>>,
     swap: ArcSwapAny<Arc<T>>,
 }
 
@@ -35,58 +35,40 @@ impl<T: Clone + Send + Sync> State<T> {
         self.wrap.get_or_init(|| {
             let initial_value = Arc::new((self.init_fn)());
             Arc::new(StateWrap {
-                lock: RwLock::new(initial_value.clone()),
+                lock: Arc::new(RwLock::new(initial_value.clone())),
                 swap: ArcSwapAny::from(initial_value),
             })
         })
     }
 
     /// Returns state guard asynchronously
-    #[track_caller]
-    pub fn lock(&self) -> impl std::future::Future<Output = StateGuard<'_, T>> {
-        #[cfg(feature = "trace-lock")]
-        let caller = std::panic::Location::caller();
-
-        async move {
-            #[cfg(feature = "trace-lock")]
-            self.trace_attempt(caller);
-
-            let wrap = self.get_or_init();
-            let write_guard = wrap.lock.write().await;
-
-            #[cfg(feature = "trace-lock")]
-            self.trace_success(caller);
-
-            StateGuard {
-                _write_guard: write_guard,
-                swap: &wrap.swap,
-                data: self.dirty_get_cloned(),
-                counter: 0,
-            }
-        }
-    }
-
-    /// Returns state guard synchronously (blocking current thread)
-    #[track_caller]
-    pub fn blocking_lock(&self) -> StateGuard<'_, T> {
-        #[cfg(feature = "trace-lock")]
-        let caller = std::panic::Location::caller();
-        #[cfg(feature = "trace-lock")]
-        self.trace_attempt(caller);
-
-        let wrap = self.get_or_init();
-        let write_guard = wrap.lock.blocking_write();
-
-        #[cfg(feature = "trace-lock")]
-        self.trace_success(caller);
+    pub async fn lock(&self) -> StateGuard<T> {
+        let wrap = self.get_or_init().clone();
+        let lock_arc = wrap.lock.clone();
+        let write_guard = lock_arc.write_owned().await;
 
         StateGuard {
             _write_guard: write_guard,
-            swap: &wrap.swap,
-            data: self.dirty_get_cloned(),
+            wrap,
+            data: self.get_dirty_cloned(),
             counter: 0,
         }
     }
+
+    // /// Returns state guard synchronously (blocking current thread)
+    // pub fn blocking_lock(&self) -> StateGuard<T> {
+    //     let wrap = self.get_or_init().clone();
+    //     let lock_arc = wrap.lock.clone();
+    //     // Передаем Arc напрямую (без разыменования *), чтобы вызывать метод self: Arc<Self>
+    //     let write_guard = RwLock::blocking_write_owned(lock_arc);
+
+    //     StateGuard {
+    //         _write_guard: write_guard,
+    //         wrap,
+    //         data: self.get_dirty_cloned(),
+    //         counter: 0,
+    //     }
+    // }
 
     /// Returns state value (wait until active write transaction finishes)
     pub async fn get(&self) -> Arc<T> {
@@ -104,7 +86,7 @@ impl<T: Clone + Send + Sync> State<T> {
 
     /// Returns state value instantly without checking locks (Lock-free)
     #[inline]
-    pub fn dirty_get(&self) -> Arc<T> {
+    pub fn get_dirty(&self) -> Arc<T> {
         self.get_or_init().swap.load_full()
     }
 
@@ -120,8 +102,8 @@ impl<T: Clone + Send + Sync> State<T> {
 
     /// Returns clone of state value instantly without locks
     #[inline]
-    pub fn dirty_get_cloned(&self) -> T {
-        self.dirty_get().as_ref().clone()
+    pub fn get_dirty_cloned(&self) -> T {
+        self.get_dirty().as_ref().clone()
     }
 
     /// Sets new value to state asynchronously
@@ -145,38 +127,23 @@ impl<T: Clone + Send + Sync> State<T> {
     }
 
     /// Sets new value without acquiring a lock (unsafe for concurrency)
-    pub fn dirty_set(&self, value: T) {
+    pub fn set_dirty(&self, value: T) {
         let new_data = Arc::new(value);
         self.get_or_init().swap.store(new_data);
     }
 }
 
-#[cfg(feature = "trace-lock")]
-impl<T: Clone + Send + Sync> State<T> {
-    #[inline(always)]
-    fn trace_attempt(&self, caller: &std::panic::Location<'_>) {
-        println!(
-            "[State<{}>] [{:?}:{:?}] Try lock -> {}:{}:{}",
-            std::any::type_name::<T>(),
-            std::thread::current().id(),
-            std::ptr::addr_of!(*self),
-            caller.file(),
-            caller.line(),
-            caller.column()
-        );
-    }
+impl<T: Clone + Send + Sync + 'static> Clone for State<T> {
+    fn clone(&self) -> Self {
+        let wrap = self.get_or_init();
 
-    #[inline(always)]
-    fn trace_success(&self, caller: &std::panic::Location<'_>) {
-        println!(
-            "[State<{}>] [{:?}:{:?}] Locked -> {}:{}:{}",
-            std::any::type_name::<T>(),
-            std::thread::current().id(),
-            std::ptr::addr_of!(*self),
-            caller.file(),
-            caller.line(),
-            caller.column()
-        );
+        let new_wrap = OnceCell::new();
+        let _ = new_wrap.set(Arc::clone(wrap));
+
+        Self {
+            wrap: new_wrap,
+            init_fn: self.init_fn,
+        }
     }
 }
 
@@ -195,22 +162,22 @@ impl<T: Default + Clone + Send + Sync> Default for State<T> {
     }
 }
 
-impl<T: Default + Clone + Send + Sync + std::fmt::Debug> From<T> for State<T> {
+impl<T: Default + Clone + Send + Sync> From<T> for State<T> {
     fn from(data: T) -> Self {
         let this = Self::default();
-        this.dirty_set(data);
+        this.set_dirty(data);
         this
     }
 }
 
 impl<T: Clone + Send + Sync + std::fmt::Debug> std::fmt::Debug for State<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", &self.dirty_get())
+        write!(f, "{:?}", &self.get_dirty())
     }
 }
 
 impl<T: Clone + Send + Sync + std::fmt::Display> std::fmt::Display for State<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", &self.dirty_get())
+        write!(f, "{}", &self.get_dirty())
     }
 }

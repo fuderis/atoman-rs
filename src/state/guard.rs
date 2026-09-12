@@ -1,23 +1,21 @@
-use arc_swap::ArcSwapAny;
 use std::sync::Arc;
-use tokio::sync::RwLockWriteGuard;
+use tokio::sync::OwnedRwLockWriteGuard;
+
+use super::StateWrap;
 
 /// Guard transaction for state changes.
-///
-/// Holds the write lock on the table during the modification of the local copy,
-/// and when `sync()` or `Drop` is called, synchronizes the data with `ArcSwap`.
-pub struct StateGuard<'a, T: Clone + Send + Sync + 'static> {
-    pub(super) _write_guard: RwLockWriteGuard<'a, Arc<T>>,
-    pub(super) swap: &'a ArcSwapAny<Arc<T>>,
+pub struct StateGuard<T: Clone + Send + Sync + 'static> {
+    pub(super) _write_guard: OwnedRwLockWriteGuard<Arc<T>>,
+    pub(super) wrap: Arc<StateWrap<T>>,
     pub(super) data: T,
     pub(super) counter: usize,
 }
 
-impl<'a, T: Clone + Send + Sync + 'static> StateGuard<'a, T> {
+impl<T: Clone + Send + Sync + 'static> StateGuard<T> {
     /// Synchronizes changes in `ArcSwap`.
     pub fn sync(&mut self) {
         let data = Arc::new(self.data.clone());
-        self.swap.store(data);
+        self.wrap.swap.store(data);
     }
 
     /// Synchronizes data only on every N‑th call.
@@ -29,22 +27,13 @@ impl<'a, T: Clone + Send + Sync + 'static> StateGuard<'a, T> {
     }
 }
 
-impl<'a, T: Clone + Send + Sync + 'static> Drop for StateGuard<'a, T> {
+impl<T: Clone + Send + Sync + 'static> Drop for StateGuard<T> {
     fn drop(&mut self) {
         self.sync();
-
-        #[cfg(feature = "trace-lock")]
-        {
-            println!(
-                "[State<{}>] [{:?}] Unlocked",
-                std::any::type_name::<T>(),
-                std::thread::current().id(),
-            );
-        }
     }
 }
 
-impl<'a, T: Clone + Send + Sync + 'static> std::ops::Deref for StateGuard<'a, T> {
+impl<T: Clone + Send + Sync + 'static> std::ops::Deref for StateGuard<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -52,19 +41,19 @@ impl<'a, T: Clone + Send + Sync + 'static> std::ops::Deref for StateGuard<'a, T>
     }
 }
 
-impl<'a, T: Clone + Send + Sync + 'static> std::ops::DerefMut for StateGuard<'a, T> {
+impl<T: Clone + Send + Sync + 'static> std::ops::DerefMut for StateGuard<T> {
     fn deref_mut(&mut self) -> &mut T {
         &mut self.data
     }
 }
 
-impl<'a, T: Clone + Send + Sync + std::fmt::Debug> std::fmt::Debug for StateGuard<'a, T> {
+impl<T: Clone + Send + Sync + std::fmt::Debug> std::fmt::Debug for StateGuard<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", &self.data)
     }
 }
 
-impl<'a, T: Clone + Send + Sync + std::fmt::Display> std::fmt::Display for StateGuard<'a, T> {
+impl<T: Clone + Send + Sync + std::fmt::Display> std::fmt::Display for StateGuard<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", &self.data)
     }

@@ -168,7 +168,7 @@ where
         let interval = Duration::from_millis(millis);
 
         // check last checked time (dirty method for quick access to the latest cached state)
-        if let Some(time) = self.modify.dirty_get().checked
+        if let Some(time) = self.modify.get_dirty().checked
             && &time.elapsed() < &interval
         {
             return Ok(false);
@@ -188,7 +188,7 @@ where
         let meta = fs::metadata(&self.path).await?;
         let modified: DateTime<Utc> = meta.modified()?.into();
 
-        if let Some(&last_modified) = self.modify.dirty_get().modified.as_ref() {
+        if let Some(&last_modified) = self.modify.get_dirty().modified.as_ref() {
             if modified <= last_modified {
                 return Ok(false);
             }
