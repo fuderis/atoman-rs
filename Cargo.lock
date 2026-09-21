@@ -103,6 +103,8 @@ dependencies = [
 [[package]]
 name = "atoman-log"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "121690caf1337c8d684072c22ffe9c1183d978f31b93e826c9e1fbe5a14ab1ee"
 dependencies = [
  "proc-macro2",
  "quote",
