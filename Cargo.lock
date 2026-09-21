@@ -66,12 +66,13 @@ dependencies = [
 
 [[package]]
 name = "atoman"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "ahash",
  "arc-swap",
  "atoman-config",
  "atoman-log",
+ "atoman-macros",
  "bytes",
  "chrono",
  "colored",
@@ -105,6 +106,17 @@ name = "atoman-log"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "076811255a666df2da041d776d601da19d14898f1c69873802ef83b6e14c079d"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.106",
+]
+
+[[package]]
+name = "atoman-macros"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cefc0f39aa91418ec9d6653ed9ccedfe4e22cb58e84b56258beb5b2944348cf4"
 dependencies = [
  "proc-macro2",
  "quote",

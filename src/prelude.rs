@@ -1,20 +1,15 @@
 #![allow(unused_imports)]
-pub(crate) use error::Error;
-pub(crate) use macron::*;
-pub(crate) use std::path::{Path, PathBuf};
-pub(crate) use std::sync::{
-    Arc, Mutex, MutexGuard,
+pub use crate::{State, error::Error};
+
+pub use macron::*;
+pub use std::path::{Path, PathBuf};
+pub use std::sync::{
+    Arc, MutexGuard,
     atomic::{AtomicBool, Ordering},
 };
-pub(crate) use tokio::sync::Notify;
 
-/// The dynamic error type
 #[allow(dead_code)]
-pub(crate) type DynError = Box<dyn std::error::Error + Send + Sync>;
-/// The short result alias
+pub type DynError = Box<dyn std::error::Error + Send + Sync>;
 #[allow(dead_code)]
-pub(crate) type Result<T> = std::result::Result<T, DynError>;
-/// The std result alias
-pub(crate) use std::result::Result as StdResult;
-
-pub use crate::*;
+pub type Result<T> = std::result::Result<T, DynError>;
+pub use std::result::Result as StdResult;

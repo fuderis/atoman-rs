@@ -1,5 +1,7 @@
 use crate::{State, prelude::*};
 
+pub use atoman_config::config;
+
 use chrono::{DateTime, Utc};
 use serde::{Serialize, de::DeserializeOwned};
 use std::{

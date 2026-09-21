@@ -14,12 +14,21 @@ pub use map::{SharedGuard, SharedGuardMut, SharedItem, SharedMap};
 
 pub use arc_swap::{self, ArcSwap, ArcSwapAny};
 pub use once_cell::{self, sync::Lazy};
-pub use tokio::*;
+
+#[cfg(feature = "re-export")]
+pub use atoman_macros::{main, test};
+#[cfg(feature = "re-export")]
+pub use tokio::{
+    self, fs, io, net,
+    process::{self, Command},
+    select,
+    sync::{self, Mutex, Notify, RwLock, Semaphore},
+    task::{self, JoinHandle, spawn, spawn_blocking},
+    time::{self, Duration, Instant, sleep, timeout},
+};
 
 #[cfg(any(feature = "json-config", feature = "toml-config"))]
 pub mod config;
-#[cfg(any(feature = "json-config", feature = "toml-config"))]
-pub use atoman_config::config;
 #[cfg(any(feature = "json-config", feature = "toml-config"))]
 pub use config::*;
 

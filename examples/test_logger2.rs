@@ -1,7 +1,7 @@
 #![cfg(feature = "logger")]
 use atoman::{Level, LogExt, Logger, Span, error, info, log, warn};
 
-#[tokio::main]
+#[atoman::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // init logger:
     Logger::init(".logs", 1000).await?;

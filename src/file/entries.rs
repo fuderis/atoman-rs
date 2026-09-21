@@ -1,4 +1,4 @@
-use crate::prelude::*;
+use crate::{Entry, prelude::*};
 use tokio::fs::ReadDir;
 
 /// A dir entries iterator
