@@ -1,7 +1,9 @@
 use crate::prelude::*;
 
 pub use atoman_log::log;
-pub use tracing::{Instrument, Level, Span, debug, error, info, trace, warn};
+pub use tracing::{self, Level, Span, debug, error, info, trace, warn};
+
+use tracing::Instrument;
 use tracing_subscriber::{Layer, layer::Context, registry::LookupSpan};
 
 use bytes::{BufMut, BytesMut};

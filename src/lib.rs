@@ -14,6 +14,7 @@ pub use map::{SharedGuard, SharedGuardMut, SharedItem, SharedMap};
 
 pub use arc_swap::{self, ArcSwap, ArcSwapAny};
 pub use once_cell::{self, sync::Lazy};
+pub use tokio::*;
 
 #[cfg(any(feature = "json-config", feature = "toml-config"))]
 pub mod config;
