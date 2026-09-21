@@ -59,3 +59,7 @@ macro_rules! lazy {
         $crate::Lazy::new(|| $e)
     };
 }
+
+pub type DynError = Box<dyn std::error::Error + Send + Sync>;
+pub type Result<T> = std::result::Result<T, DynError>;
+pub use std::result::Result as StdResult;
