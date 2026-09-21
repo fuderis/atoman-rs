@@ -30,7 +30,7 @@ pub trait LogExt: Sized {
 
 impl<F: std::future::Future> LogExt for F {}
 
-/// Raw event container to bypass string formatting allocations in hot path
+/// Raw event container to bypass string formatting allocations in hot path.
 pub struct RawLogEvent {
     pub level: Level,
     pub timestamp: DateTime<Utc>,
@@ -38,16 +38,16 @@ pub struct RawLogEvent {
     pub message: BytesMut,
 }
 
-/// The log command
+/// Log command.
 enum LogCmd {
     Log(RawLogEvent),
     Flush(oneshot::Sender<()>),
 }
 
-/// The custom fields wrapper
+/// Custom fields wrapper.
 struct CustomFields(String);
 
-/// The logger state
+/// Logger state.
 #[derive(Default, Clone)]
 struct LoggerState {
     level: Option<Level>,
@@ -55,18 +55,18 @@ struct LoggerState {
     tx: Option<mpsc::Sender<LogCmd>>,
 }
 
-/// The atomic logger
+/// Atomic logger.
 pub struct Logger {
     tx: mpsc::Sender<LogCmd>,
 }
 
 impl Logger {
-    /// Returns the current .log file path
+    /// Returns active log file path.
     pub fn path() -> Option<PathBuf> {
         LOGGER_STATE.get().path.clone()
     }
 
-    /// Returns the current log level
+    /// Returns active log level.
     pub fn level() -> Level {
         match CURRENT_LEVEL.load(Ordering::Relaxed) {
             1 => Level::ERROR,
@@ -77,7 +77,7 @@ impl Logger {
         }
     }
 
-    /// Changes the log level
+    /// Changes log level.
     pub async fn set_level(level: Level) {
         let num = match level {
             Level::ERROR => 1,
@@ -91,7 +91,7 @@ impl Logger {
         LOGGER_STATE.lock().await.level.replace(level);
     }
 
-    /// Initializes the logger
+    /// Initializes logger.
     pub async fn init<P: Into<PathBuf>>(logs_dir: P, max_files: usize) -> Result<()> {
         let logs_dir = logs_dir.into();
 
@@ -142,7 +142,7 @@ impl Logger {
         Ok(())
     }
 
-    /// Forced push of the worker buffer to disk
+    /// Forced push of the worker buffer to disk.
     pub async fn flush() {
         let tx = LOGGER_STATE.get().tx.clone();
         if let Some(tx) = tx {
@@ -153,7 +153,7 @@ impl Logger {
         }
     }
 
-    /// Traces all logs in current file by filter
+    /// Traces all logs in current file by filter.
     pub async fn trace(filters: &[String]) -> Result<String> {
         let Some(file_path) = LOGGER_STATE.get().path.clone() else {
             return Err("Log file path is missing".into());
@@ -162,7 +162,7 @@ impl Logger {
         Self::trace_file(file_path, filters).await
     }
 
-    /// Traces all logs in file by filter
+    /// Traces all logs in file by filter.
     pub async fn trace_file(file_path: impl AsRef<Path>, filters: &[String]) -> Result<String> {
         Self::flush().await;
 
@@ -182,7 +182,7 @@ impl Logger {
         Ok(matched_lines)
     }
 
-    /// Creates a new log file path
+    /// Creates new log file path.
     pub fn gen_path(dir: impl AsRef<Path>) -> PathBuf {
         let dt = Utc::now().format("%Y-%m-%d_%H-%M-%S%.6f").to_string();
         let pid = std::process::id();
@@ -231,7 +231,7 @@ where
         let level = *event.metadata().level();
         let timestamp = Utc::now();
 
-        // 1. Формируем контекст спанов
+        // creating span context
         let mut spans_str = None;
         if let Some(scope) = ctx.event_scope(event) {
             let mut span_buf = String::new();
@@ -259,7 +259,7 @@ where
             }
         }
 
-        // 2. Пишем тело ивента напрямую в байтовый буфер без аллокаций сырых строк
+        // write event body directly to the byte buffer without allocating raw strings
         let mut raw_msg = BytesMut::with_capacity(256);
 
         struct EventVisitor<'a>(&'a mut BytesMut);
@@ -275,7 +275,7 @@ where
 
         event.record(&mut EventVisitor(&mut raw_msg));
 
-        // 3. Отправляем в воркер сырое событие
+        // sending a raw event to the worker
         let raw_event = RawLogEvent {
             level,
             timestamp,
@@ -287,7 +287,7 @@ where
     }
 }
 
-/// The log files writer worker
+/// Log files writer worker.
 async fn worker(mut rx: mpsc::Receiver<LogCmd>) {
     let mut file = None::<BufWriter<fs::File>>;
     let mut buffer = BytesMut::with_capacity(64 * 1024);
@@ -300,17 +300,17 @@ async fn worker(mut rx: mpsc::Receiver<LogCmd>) {
             LogCmd::Log(raw_event) => {
                 let seconds = raw_event.timestamp.timestamp();
 
-                // Кэшируем форматирование даты на уровень воркера
+                // caching date formatting at the worker level
                 if seconds != timestamp_sec {
                     datetime = raw_event.timestamp.format("%Y-%m-%dT%H:%M:%SZ").to_string();
                     timestamp_sec = seconds;
                 }
 
-                let msg_str = std::str::from_utf8(&raw_event.message).unwrap_or("");
-
-                // Вывод в консоль в режиме отладки
+                // output to the console in debugging mode
                 #[cfg(debug_assertions)]
                 {
+                    let msg_str = std::str::from_utf8(&raw_event.message).unwrap_or("");
+
                     let time_clr = "\x1b[38;5;248m";
                     let meta_clr = "\x1b[34m";
                     let reset = "\x1b[0m";
@@ -377,7 +377,7 @@ async fn worker(mut rx: mpsc::Receiver<LogCmd>) {
                     }
                 }
 
-                // Записываем собранный логирующий ивент в бинарный буфер файла
+                // write collected logging event to the binary buffer of the file
                 if let Some(writer) = file.as_mut() {
                     buffer.put_slice(datetime.as_bytes());
                     buffer.put_u8(b' ');

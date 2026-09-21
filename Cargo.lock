@@ -66,7 +66,7 @@ dependencies = [
 
 [[package]]
 name = "atoman"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "ahash",
  "arc-swap",
@@ -103,6 +103,8 @@ dependencies = [
 [[package]]
 name = "atoman-log"
 version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "076811255a666df2da041d776d601da19d14898f1c69873802ef83b6e14c079d"
 dependencies = [
  "proc-macro2",
  "quote",
