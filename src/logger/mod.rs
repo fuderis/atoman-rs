@@ -1,10 +1,11 @@
 use crate::prelude::*;
 
-pub use tracing::{Instrument, Level, Span, debug, error, info, instrument as log, trace, warn};
+pub use atoman_log::log;
+pub use tracing::{Instrument, Level, Span, debug, error, info, trace, warn};
 use tracing_subscriber::{Layer, layer::Context, registry::LookupSpan};
 
 use bytes::{BufMut, BytesMut};
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use std::{
     path::{Path, PathBuf},
     sync::atomic::{AtomicU8, Ordering},
@@ -19,9 +20,25 @@ const BUFFER_SIZE: usize = 500_000;
 static CURRENT_LEVEL: AtomicU8 = AtomicU8::new(3);
 static LOGGER_STATE: State<LoggerState> = State::new(|| Default::default());
 
+pub trait LogExt: Sized {
+    fn log_span(self, span: Span) -> tracing::instrument::Instrumented<Self> {
+        self.instrument(span)
+    }
+}
+
+impl<F: std::future::Future> LogExt for F {}
+
+/// Raw event container to bypass string formatting allocations in hot path
+pub struct RawLogEvent {
+    pub level: Level,
+    pub timestamp: DateTime<Utc>,
+    pub spans: Option<String>,
+    pub message: BytesMut,
+}
+
 /// The log command
 enum LogCmd {
-    Log(Level, String),
+    Log(RawLogEvent),
     Flush(oneshot::Sender<()>),
 }
 
@@ -134,7 +151,7 @@ impl Logger {
         }
     }
 
-    /// Traces the all logs in current file by filter
+    /// Traces all logs in current file by filter
     pub async fn trace(filters: &[String]) -> Result<String> {
         let Some(file_path) = LOGGER_STATE.get().path.clone() else {
             return Err("Log file path is missing".into());
@@ -143,7 +160,7 @@ impl Logger {
         Self::trace_file(file_path, filters).await
     }
 
-    /// Traces the all logs in file by filter
+    /// Traces all logs in file by filter
     pub async fn trace_file(file_path: impl AsRef<Path>, filters: &[String]) -> Result<String> {
         Self::flush().await;
 
@@ -210,33 +227,41 @@ where
 
     fn on_event(&self, event: &tracing::Event<'_>, ctx: Context<'_, S>) {
         let level = *event.metadata().level();
-        let mut msg = String::new();
+        let timestamp = Utc::now();
 
-        let mut has_spans = false;
+        // 1. Формируем контекст спанов
+        let mut spans_str = None;
         if let Some(scope) = ctx.event_scope(event) {
+            let mut span_buf = String::new();
+            let mut has_spans = false;
+
             for span in scope.from_root() {
                 if !has_spans {
-                    msg.push('[');
+                    span_buf.push('[');
                     has_spans = true;
                 } else {
-                    msg.push_str(" -> ");
+                    span_buf.push_str(" -> ");
                 }
-                msg.push_str(span.name());
+                span_buf.push_str(span.name());
 
                 let extensions = span.extensions();
                 if let Some(fields) = extensions.get::<CustomFields>() {
-                    msg.push('{');
-                    msg.push_str(&fields.0);
-                    msg.push('}');
+                    span_buf.push('{');
+                    span_buf.push_str(&fields.0);
+                    span_buf.push('}');
                 }
             }
             if has_spans {
-                msg.push_str("] ");
+                span_buf.push_str("] ");
+                spans_str = Some(span_buf);
             }
         }
 
-        struct StringVisitor<'a>(&'a mut String);
-        impl<'a> tracing::field::Visit for StringVisitor<'a> {
+        // 2. Пишем тело ивента напрямую в байтовый буфер без аллокаций сырых строк
+        let mut raw_msg = BytesMut::with_capacity(256);
+
+        struct EventVisitor<'a>(&'a mut BytesMut);
+        impl<'a> tracing::field::Visit for EventVisitor<'a> {
             fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
                 if field.name() == "message" {
                     let _ = std::fmt::write(self.0, format_args!("{value:?}"));
@@ -246,37 +271,49 @@ where
             }
         }
 
-        event.record(&mut StringVisitor(&mut msg));
-        self.tx.try_send(LogCmd::Log(level, msg)).ok();
+        event.record(&mut EventVisitor(&mut raw_msg));
+
+        // 3. Отправляем в воркер сырое событие
+        let raw_event = RawLogEvent {
+            level,
+            timestamp,
+            spans: spans_str,
+            message: raw_msg,
+        };
+
+        self.tx.try_send(LogCmd::Log(raw_event)).ok();
     }
 }
 
-/// The log files writer
+/// The log files writer worker
 async fn worker(mut rx: mpsc::Receiver<LogCmd>) {
     let mut file = None::<BufWriter<fs::File>>;
     let mut buffer = BytesMut::with_capacity(64 * 1024);
     let mut date = Some(Utc::now().date_naive());
     let mut datetime = String::new();
-    let mut timestamp = 0i64;
+    let mut timestamp_sec = 0i64;
 
     while let Some(cmd) = rx.recv().await {
         match cmd {
-            LogCmd::Log(lvl, msg) => {
-                let now = Utc::now();
-                let seconds = now.timestamp();
+            LogCmd::Log(raw_event) => {
+                let seconds = raw_event.timestamp.timestamp();
 
-                if seconds != timestamp {
-                    datetime = now.format("%Y-%m-%dT%H:%M:%SZ").to_string();
-                    timestamp = seconds;
+                // Кэшируем форматирование даты на уровень воркера
+                if seconds != timestamp_sec {
+                    datetime = raw_event.timestamp.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+                    timestamp_sec = seconds;
                 }
 
+                let msg_str = std::str::from_utf8(&raw_event.message).unwrap_or("");
+
+                // Вывод в консоль в режиме отладки
                 #[cfg(debug_assertions)]
                 {
-                    let time_clr = "\x1b[38m";
+                    let time_clr = "\x1b[38;5;248m";
                     let meta_clr = "\x1b[34m";
                     let reset = "\x1b[0m";
 
-                    let lvl_clr = match lvl {
+                    let lvl_clr = match raw_event.level {
                         Level::INFO => "\x1b[32m",
                         Level::WARN => "\x1b[33m",
                         Level::ERROR => "\x1b[31m",
@@ -284,19 +321,16 @@ async fn worker(mut rx: mpsc::Receiver<LogCmd>) {
                         Level::TRACE => "\x1b[90m",
                     };
 
-                    if msg.starts_with('[') {
-                        if let Some(pos) = msg.find("] ") {
-                            let meta = &msg[..=pos];
-                            let body = &msg[pos + 1..];
-
-                            println!(
-                                "{time_clr}{datetime}{reset} {lvl_clr}{lvl:<5}{reset} {meta_clr}{meta}{reset}{body}"
-                            );
-                        } else {
-                            println!("{meta_clr}{datetime}{reset} {lvl_clr}{lvl:<5}{reset} {msg}");
-                        }
+                    if let Some(ref spans) = raw_event.spans {
+                        println!(
+                            "{time_clr}{datetime}{reset} {lvl_clr}{:<5}{reset} {meta_clr}{spans}{reset}{msg_str}",
+                            raw_event.level
+                        );
                     } else {
-                        println!("{meta_clr}{datetime}{reset} {lvl_clr}{lvl:<5}{reset} {msg}");
+                        println!(
+                            "{time_clr}{datetime}{reset} {lvl_clr}{:<5}{reset} {msg_str}",
+                            raw_event.level
+                        );
                     }
                 }
 
@@ -316,7 +350,7 @@ async fn worker(mut rx: mpsc::Receiver<LogCmd>) {
                     }
                 }
 
-                let today = now.date_naive();
+                let today = raw_event.timestamp.date_naive();
                 if date != Some(today) {
                     if let Some(mut old_writer) = file.take() {
                         if !buffer.is_empty() {
@@ -341,9 +375,20 @@ async fn worker(mut rx: mpsc::Receiver<LogCmd>) {
                     }
                 }
 
+                // Записываем собранный логирующий ивент в бинарный буфер файла
                 if let Some(writer) = file.as_mut() {
-                    let line = format!("{datetime} {lvl:<5} {msg}\n");
-                    buffer.put_slice(line.as_bytes());
+                    buffer.put_slice(datetime.as_bytes());
+                    buffer.put_u8(b' ');
+                    let lvl_str = format!("{:<5}", raw_event.level);
+                    buffer.put_slice(lvl_str.as_bytes());
+                    buffer.put_u8(b' ');
+
+                    if let Some(ref spans) = raw_event.spans {
+                        buffer.put_slice(spans.as_bytes());
+                    }
+
+                    buffer.put_slice(&raw_event.message);
+                    buffer.put_u8(b'\n');
 
                     if rx.is_empty() || buffer.len() > 48 * 1024 {
                         if writer.write_all(&buffer).await.is_ok() {

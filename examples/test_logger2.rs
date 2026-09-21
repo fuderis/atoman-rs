@@ -1,5 +1,5 @@
 #![cfg(feature = "logger")]
-use atoman::{Instrument, Level, Logger, Span, error, info, log, warn};
+use atoman::{Level, LogExt, Logger, Span, error, info, log, warn};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -18,7 +18,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     Ok(())
 }
 
-#[log(skip_all, fields(sid = %session_id, uid = %user_id))]
+#[log(sid = %session_id, uid = %user_id)]
 async fn handle_transfer_request(
     session_id: u64,
     user_id: u64,
@@ -61,7 +61,7 @@ async fn handle_transfer_request(
                     }
                 }
             }
-            .instrument(current_context),
+            .log_span(current_context),
         );
 
         let _ = task.await;
@@ -72,7 +72,7 @@ async fn handle_transfer_request(
     info!("Transfer request lifecycle ended");
 }
 
-#[log(skip_all, fields(account = %account_number))]
+#[log(account = %account_number)]
 async fn validate_source_balance(account_number: &str, transaction_amount: u32) -> bool {
     let is_balance_valid = transaction_amount < 1000;
 
@@ -88,13 +88,13 @@ async fn validate_source_balance(account_number: &str, transaction_amount: u32) 
     is_balance_valid
 }
 
-#[log(skip_all, fields(target = %destination_account))]
+#[log(target = %destination_account)]
 async fn dispatch_to_gateway(destination_account: &str, user_id: u64) -> Result<(), &'static str> {
     info!("Routing transaction to external clearing network");
     execute_external_settlement(user_id).await
 }
 
-#[log(skip_all)]
+#[log]
 async fn execute_external_settlement(user_id: u64) -> Result<(), &'static str> {
     let is_gateway_responsive = user_id == 7777;
 

@@ -11,13 +11,14 @@ use std::{
     hash::{BuildHasher, Hash, Hasher},
     sync::Arc,
 };
+use tokio::sync::RwLock;
 
 /// Total number of shards used to partition the map entries.
 pub const SHARDS_COUNT: usize = 64;
 
 /// Single shard wrapping a thread-safe hash map protected by a reader-writer lock.
 pub(crate) struct Shard<K: Eq + Hash + 'static, V> {
-    map: tokio::sync::RwLock<HashMap<Arc<K>, SharedItem<V>>>,
+    map: RwLock<HashMap<Arc<K>, SharedItem<V>>>,
 }
 
 /// Inner container holding the fixed-size array of shards and the hasher builder.

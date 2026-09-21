@@ -4,7 +4,7 @@ description = "The config implementation macros for atoman crate"
 version = "0.3.2"
 license = "MIT"
 authors = ["Bulat Sh. <synapdrake@ya.ru>"]
-repository = "https://github.com/fuderis/atoman-rs/blob/main/config"
+repository = "https://github.com/fuderis/atoman-rs/blob/main/atoman-config"
 edition = "2024"
 
 [lib]

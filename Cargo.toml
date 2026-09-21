@@ -3,7 +3,7 @@ name = "atoman"
 description = "A library for managing shared asynchronous data across threads. Provides safe concurrent access to application state with automatic synchronization and minimizes the need for manual lock management."
 keywords = ["atomic", "static", "flag", "state", "config"]
 categories = ["development-tools", "rust-patterns"]
-version = "0.10.2"
+version = "0.11.0"
 license = "MIT"
 authors = ["Bulat Sh. <synapdrake@ya.ru>"]
 repository = "https://github.com/fuderis/atoman-rs"
@@ -18,6 +18,7 @@ tokio = { version = "1.49.0", features = ["full"] }
 ahash = "0.8.12"
 
 atoman-config = { version = "0.3.2", optional = true }
+atoman-log = { version = "0.1.0", optional = true }
 
 serde = { version = "1.0.228", features = ["derive"], optional = true }
 serde_json = { version = "1.0.148", optional = true }
@@ -38,10 +39,9 @@ full = ["channel", "file", "config", "logger", "trace", "search"]
 config = ["json-config", "toml-config", "dep:chrono"]
 json-config = ["dep:atoman-config", "dep:serde", "dep:serde_json"]
 toml-config = ["dep:atoman-config", "dep:serde", "dep:toml"]
-logger = ["dep:tracing", "dep:tracing-subscriber",  "dep:chrono", "dep:bytes"]
+logger = ["dep:atoman-log", "dep:tracing", "dep:tracing-subscriber",  "dep:chrono", "dep:bytes"]
 trace = ["dep:regex", "dep:colored"]
 channel = ["dep:serde", "dep:serde_json"]
 file = ["dep:bytes", "dep:chrono", "dep:serde"]
 search = ["dep:regex", "dep:fuzzy-cmp"]
 tracing = ["dep:tracing"]
-tracing-subscriber = ["dep:tracing-subscriber"]
