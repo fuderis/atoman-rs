@@ -1,0 +1,17 @@
+[package]
+name = "atoman-config"
+description = "The config implementation macros for atoman crate"
+version = "0.3.3"
+license = "MIT"
+authors = ["Bulat Sh. <synapdrake@ya.ru>"]
+repository = "https://github.com/fuderis/atoman-rs/blob/main/crates/config"
+edition = "2024"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn.workspace = true
+quote.workspace = true
+proc-macro2.workspace = true
+heck.workspace = true
