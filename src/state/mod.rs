@@ -76,6 +76,14 @@ impl<T: Clone + Send + Sync> State<T> {
         self.get_or_init().swap.load_full()
     }
 
+    /// Returns state value with locking state (guarantees relevance).
+    pub async fn get_locked(&self) -> Arc<T> {
+        let wrap = self.get_or_init();
+        let _ = wrap.mutex.lock();
+
+        wrap.swap.load_full()
+    }
+
     /// Returns clone of state value instantly without locks.
     #[inline]
     pub fn get_cloned(&self) -> T {

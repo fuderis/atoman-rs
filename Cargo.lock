@@ -66,7 +66,7 @@ dependencies = [
 
 [[package]]
 name = "atoman"
-version = "0.11.4"
+version = "0.11.5"
 dependencies = [
  "ahash",
  "arc-swap",
