@@ -1,0 +1,16 @@
+[package]
+name = "atoman-macros"
+description = "The atoman attribute macros (atoman::main, atoman::test)."
+version = "0.1.1"
+license = "MIT"
+authors = ["Bulat Sh. <synapdrake@ya.ru>"]
+repository = "https://github.com/fuderis/atoman-rs/blob/main/crates/macros"
+edition = "2024"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn.workspace = true
+quote.workspace = true
+proc-macro2.workspace = true
