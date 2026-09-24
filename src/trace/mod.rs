@@ -19,7 +19,7 @@ use tokio::{
 /// and a valid log severity level (e.g., `2026-08-26T23:36:44Z INFO`).
 pub const ENTRY_START_PATTERN: &str = r"^\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?\s+(?:TRACE|DEBUG|INFO|WARN|WARNING|ERROR|ERR|FATAL)\b";
 
-/// Represents a single structural log record collected from a source.
+/// Log record.
 #[derive(Debug, Clone)]
 pub struct LogRecord {
     /// The name or identifier of the log source.
@@ -28,10 +28,10 @@ pub struct LogRecord {
     pub content: String,
 }
 
-/// Filtering engine that evaluates log records against regular expressions and key-value criteria.
+/// Log record filter.
 #[derive(Clone, Debug)]
 pub struct FilterEngine {
-    /// Compiled regular expressions that every log entry must match.
+    /// Regular expressions that every log entry must match.
     pub regexes: Vec<Regex>,
     /// Key-value pairs required to exist within the log message text.
     pub kv_filters: Vec<(String, String)>,
@@ -193,7 +193,7 @@ impl MultiTrace {
         }
 
         loop {
-            // resolve the latest file in the target directory
+            // resolve latest file in the target directory
             if let Some(latest_file) = Self::find_latest_file(&config.dir_path).await {
                 let is_new_file = current_file.as_ref() != Some(&latest_file);
 
@@ -336,19 +336,15 @@ impl MultiTrace {
                 // format target module prefix
                 let target_str = caps
                     .name("target")
-                    .map(|m| format!("{} ", m.as_str().magenta()))
+                    .map(|m| format!("{} ", m.as_str().blue()))
                     .unwrap_or_default();
 
                 // colorize custom bracketed tags in message payload
                 let raw_msg = caps.name("msg").map(|m| m.as_str()).unwrap_or_default();
-                let msg_str = tag_re.replace_all(raw_msg, |c: &regex::Captures| {
-                    c[1].cyan().bold().to_string()
-                });
+                let msg_str =
+                    tag_re.replace_all(raw_msg, |c: &regex::Captures| c[1].magenta().to_string());
 
-                println!(
-                    "{} {}{}{}{}",
-                    source_badge, time_str, level_str, target_str, msg_str
-                );
+                println!("{source_badge} {time_str}{level_str}{target_str}{msg_str}");
             } else {
                 // fallback printing for unstructured first line
                 let formatted_line = tag_re.replace_all(first_line, |c: &regex::Captures| {
