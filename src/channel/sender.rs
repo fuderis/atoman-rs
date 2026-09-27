@@ -1,67 +1,63 @@
 use crate::prelude::*;
 use tokio::sync::mpsc::{self, error::TrySendError};
 
-/// The channel sender
-#[derive(Clone)]
+/// Channel sender wrapper around bounded and unbounded tokio mpsc senders.
 pub enum Sender<T> {
     Unbounded(mpsc::UnboundedSender<Result<T>>),
     Bounded(mpsc::Sender<Result<T>>),
 }
 
+impl<T> Clone for Sender<T> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Unbounded(tx) => Self::Unbounded(tx.clone()),
+            Self::Bounded(tx) => Self::Bounded(tx.clone()),
+        }
+    }
+}
+
 impl<T> Sender<T> {
-    /// Sends a data to the receiver
+    /// Helper method to send raw Result through synchronous try_send.
+    fn send_raw_sync(&self, res: Result<T>) -> Result<()> {
+        match self {
+            Self::Unbounded(tx) => tx.send(res).map_err(|_| Error::ChannelClosed.into()),
+            Self::Bounded(tx) => match tx.try_send(res) {
+                Ok(_) => Ok(()),
+                Err(TrySendError::Full(_)) => Err(Error::ChannelFull.into()),
+                Err(TrySendError::Closed(_)) => Err(Error::ChannelClosed.into()),
+            },
+        }
+    }
+
+    /// Helper method to send raw Result asynchronously.
+    async fn send_raw_async(&self, res: Result<T>) -> Result<()> {
+        match self {
+            Self::Unbounded(tx) => tx.send(res).map_err(|_| Error::ChannelClosed.into()),
+            Self::Bounded(tx) => tx.send(res).await.map_err(|_| Error::ChannelClosed.into()),
+        }
+    }
+
+    /// Non-blocking send: returns ChannelFull error if bounded channel is capacity-constrained.
     pub fn send(&self, item: impl Into<T>) -> Result<()> {
-        match self {
-            Self::Unbounded(tx) => tx
-                .send(Ok(item.into()))
-                .map_err(|_| Error::ChannelClosed.into()),
-            Self::Bounded(tx) => match tx.try_send(Ok(item.into())) {
-                Ok(_) => Ok(()),
-                Err(TrySendError::Full(_)) => Err(Error::ChannelFull.into()),
-                Err(TrySendError::Closed(_)) => Err(Error::ChannelClosed.into()),
-            },
-        }
+        self.send_raw_sync(Ok(item.into()))
     }
 
-    /// Tries to a send data to the receiver
+    /// Async send: waits until capacity is available in bounded channel.
     pub async fn send_async(&self, item: impl Into<T>) -> Result<()> {
-        match self {
-            Self::Unbounded(tx) => tx
-                .send(Ok(item.into()))
-                .map_err(|_| Error::ChannelClosed.into()),
-            Self::Bounded(tx) => tx
-                .send(Ok(item.into()))
-                .await
-                .map_err(|_| Error::ChannelClosed.into()),
-        }
+        self.send_raw_async(Ok(item.into())).await
     }
 
-    /// Sends an error to receiver
+    /// Non-blocking error send.
     pub fn send_err(&self, error: DynError) -> Result<()> {
-        match self {
-            Self::Unbounded(tx) => tx.send(Err(error)).map_err(|_| Error::ChannelClosed.into()),
-
-            Self::Bounded(tx) => match tx.try_send(Err(error)) {
-                Ok(_) => Ok(()),
-                Err(TrySendError::Full(_)) => Err(Error::ChannelFull.into()),
-                Err(TrySendError::Closed(_)) => Err(Error::ChannelClosed.into()),
-            },
-        }
+        self.send_raw_sync(Err(error))
     }
 
-    /// Tries to send an error to receiver
+    /// Async error send.
     pub async fn send_err_async(&self, error: DynError) -> Result<()> {
-        match self {
-            Self::Unbounded(tx) => tx.send(Err(error)).map_err(|_| Error::ChannelClosed.into()),
-
-            Self::Bounded(tx) => tx
-                .send(Err(error))
-                .await
-                .map_err(|_| Error::ChannelClosed.into()),
-        }
+        self.send_raw_async(Err(error)).await
     }
 
-    /// Checks the channel for closed
+    /// Checks if the channel is closed.
     pub fn is_closed(&self) -> bool {
         match self {
             Self::Unbounded(tx) => tx.is_closed(),
@@ -69,7 +65,7 @@ impl<T> Sender<T> {
         }
     }
 
-    /// Works until the connection is closed
+    /// Waits until the receiver is closed.
     pub async fn closed(&self) {
         match self {
             Self::Unbounded(tx) => tx.closed().await,
