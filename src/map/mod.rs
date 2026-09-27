@@ -68,7 +68,8 @@ impl<K: Eq + Hash + 'static, V: 'static> SharedMap<K, V> {
     }
 
     /// Inserts key-value pair into the map asynchronously.
-    pub async fn insert(&self, key: K, value: V) {
+    /// (returns `Some(old_item)` with overwritten data)
+    pub async fn insert(&self, key: K, value: V) -> Option<SharedItem<V>> {
         let inner = self.get_or_init();
         let shard = self.get_shard(inner, &key);
 
@@ -76,7 +77,24 @@ impl<K: Eq + Hash + 'static, V: 'static> SharedMap<K, V> {
         let item = SharedItem::new(value);
 
         let mut guard = shard.map.write().await;
-        guard.insert(key_arc, item);
+        guard.insert(key_arc, item)
+    }
+
+    /// Inserts key-value pair only if the key is not already present.
+    /// (returns `Some(existing_item)` if key already present, or `None` if inserted successfully)
+    pub async fn try_insert(&self, key: K, value: V) -> Option<SharedItem<V>> {
+        let inner = self.get_or_init();
+        let shard = self.get_shard(inner, &key);
+
+        let mut guard = shard.map.write().await;
+        if let Some(existing) = guard.get(&key) {
+            Some(existing.clone())
+        } else {
+            let key_arc = Arc::new(key);
+            let item = SharedItem::new(value);
+            guard.insert(key_arc, item);
+            None
+        }
     }
 
     /// Removes key from the map asynchronously and returns the removed item.
