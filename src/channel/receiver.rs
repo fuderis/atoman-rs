@@ -1,4 +1,9 @@
 use crate::prelude::*;
+
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+};
 use tokio::sync::{mpsc, oneshot};
 
 /// Generic channel receiver.
@@ -98,5 +103,49 @@ impl<T> From<mpsc::Receiver<Result<T>>> for Receiver<T> {
 impl<T> From<oneshot::Receiver<Result<T>>> for Receiver<T> {
     fn from(rx: oneshot::Receiver<Result<T>>) -> Self {
         Self::Oneshot(Some(rx))
+    }
+}
+
+impl<T> Future for Receiver<T> {
+    type Output = Result<Option<T>>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match &mut *self {
+            Self::Unbounded(rx) => match rx.poll_recv(cx) {
+                Poll::Ready(Some(Ok(item))) => Poll::Ready(Ok(Some(item))),
+                Poll::Ready(Some(Err(err))) => Poll::Ready(Err(err)),
+                Poll::Ready(None) => Poll::Ready(Ok(None)),
+                Poll::Pending => Poll::Pending,
+            },
+
+            Self::Bounded(rx) => match rx.poll_recv(cx) {
+                Poll::Ready(Some(Ok(item))) => Poll::Ready(Ok(Some(item))),
+                Poll::Ready(Some(Err(err))) => Poll::Ready(Err(err)),
+                Poll::Ready(None) => Poll::Ready(Ok(None)),
+                Poll::Pending => Poll::Pending,
+            },
+
+            Self::Oneshot(rx_opt) => {
+                let Some(rx) = rx_opt.as_mut() else {
+                    return Poll::Ready(Ok(None));
+                };
+
+                match Pin::new(rx).poll(cx) {
+                    Poll::Ready(Ok(Ok(item))) => {
+                        rx_opt.take();
+                        Poll::Ready(Ok(Some(item)))
+                    }
+                    Poll::Ready(Ok(Err(err))) => {
+                        rx_opt.take();
+                        Poll::Ready(Err(err))
+                    }
+                    Poll::Ready(Err(_)) => {
+                        rx_opt.take();
+                        Poll::Ready(Ok(None))
+                    }
+                    Poll::Pending => Poll::Pending,
+                }
+            }
+        }
     }
 }
