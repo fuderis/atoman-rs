@@ -1,10 +1,11 @@
 use crate::prelude::*;
-use tokio::sync::mpsc::{self, error::TrySendError};
+use tokio::sync::{Mutex, mpsc, oneshot};
 
-/// Channel sender wrapper around bounded and unbounded tokio mpsc senders.
+/// Generic channel sender.
 pub enum Sender<T> {
     Unbounded(mpsc::UnboundedSender<Result<T>>),
     Bounded(mpsc::Sender<Result<T>>),
+    Oneshot(Arc<Mutex<Option<oneshot::Sender<Result<T>>>>>),
 }
 
 impl<T> Clone for Sender<T> {
@@ -12,20 +13,33 @@ impl<T> Clone for Sender<T> {
         match self {
             Self::Unbounded(tx) => Self::Unbounded(tx.clone()),
             Self::Bounded(tx) => Self::Bounded(tx.clone()),
+            Self::Oneshot(tx) => Self::Oneshot(Arc::clone(tx)),
         }
     }
 }
 
 impl<T> Sender<T> {
-    /// Helper method to send raw Result through synchronous try_send.
+    /// Helper method to send raw Result synchronously.
     fn send_raw_sync(&self, res: Result<T>) -> Result<()> {
         match self {
             Self::Unbounded(tx) => tx.send(res).map_err(|_| Error::ChannelClosed.into()),
             Self::Bounded(tx) => match tx.try_send(res) {
                 Ok(_) => Ok(()),
-                Err(TrySendError::Full(_)) => Err(Error::ChannelFull.into()),
-                Err(TrySendError::Closed(_)) => Err(Error::ChannelClosed.into()),
+                Err(mpsc::error::TrySendError::Full(_)) => Err(Error::ChannelFull.into()),
+                Err(mpsc::error::TrySendError::Closed(_)) => Err(Error::ChannelClosed.into()),
             },
+            Self::Oneshot(tx) => {
+                let Ok(mut guard) = tx.try_lock() else {
+                    return Err(Error::ChannelClosed.into());
+                };
+                if let Some(oneshot_tx) = guard.take() {
+                    oneshot_tx
+                        .send(res)
+                        .map_err(|_| Error::ChannelClosed.into())
+                } else {
+                    Err(Error::ChannelClosed.into())
+                }
+            }
         }
     }
 
@@ -34,6 +48,7 @@ impl<T> Sender<T> {
         match self {
             Self::Unbounded(tx) => tx.send(res).map_err(|_| Error::ChannelClosed.into()),
             Self::Bounded(tx) => tx.send(res).await.map_err(|_| Error::ChannelClosed.into()),
+            Self::Oneshot(_) => self.send_raw_sync(res),
         }
     }
 
@@ -62,6 +77,15 @@ impl<T> Sender<T> {
         match self {
             Self::Unbounded(tx) => tx.is_closed(),
             Self::Bounded(tx) => tx.is_closed(),
+            Self::Oneshot(tx) => {
+                let Ok(guard) = tx.try_lock() else {
+                    return true;
+                };
+                match &*guard {
+                    Some(oneshot_tx) => oneshot_tx.is_closed(),
+                    None => true,
+                }
+            }
         }
     }
 
@@ -70,6 +94,12 @@ impl<T> Sender<T> {
         match self {
             Self::Unbounded(tx) => tx.closed().await,
             Self::Bounded(tx) => tx.closed().await,
+            Self::Oneshot(tx) => {
+                let mut guard = tx.lock().await;
+                if let Some(oneshot_tx) = guard.as_mut() {
+                    oneshot_tx.closed().await;
+                }
+            }
         }
     }
 }
@@ -83,5 +113,11 @@ impl<T> From<mpsc::UnboundedSender<Result<T>>> for Sender<T> {
 impl<T> From<mpsc::Sender<Result<T>>> for Sender<T> {
     fn from(tx: mpsc::Sender<Result<T>>) -> Self {
         Self::Bounded(tx)
+    }
+}
+
+impl<T> From<oneshot::Sender<Result<T>>> for Sender<T> {
+    fn from(tx: oneshot::Sender<Result<T>>) -> Self {
+        Self::Oneshot(Arc::new(Mutex::new(Some(tx))))
     }
 }

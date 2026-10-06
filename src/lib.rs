@@ -9,8 +9,8 @@ pub use flag::Flag;
 pub mod state;
 pub use state::{State, StateGuard};
 
-pub mod map;
-pub use map::{SharedGuard, SharedGuardMut, SharedItem, SharedMap};
+pub mod shared;
+pub use shared::{SharedGuard, SharedGuardMut, SharedItem, SharedMap, SharedSet};
 
 pub use arc_swap::{self, ArcSwap, ArcSwapAny};
 pub use once_cell::{self, sync::Lazy};

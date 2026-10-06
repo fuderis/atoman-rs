@@ -60,14 +60,11 @@ pub struct Config {
 async fn main() {
     assert_eq!(CONFIG.get().count, 10);
 
-    CONFIG.lock().await.count = 30;
-    assert_eq!(CONFIG.get().count, 30);
-
-    CONFIG.set(Config { count: 20 }).await;
-    assert_eq!(CONFIG.get().count, 20);
-
-    CONFIG.blocking_set(Config { count: 15 });
+    CONFIG.set(Config { count: 15 }).await;
     assert_eq!(CONFIG.get().count, 15);
+
+    CONFIG.lock().await.count = 20;
+    assert_eq!(CONFIG.get().count, 20);
 }
 ```
 

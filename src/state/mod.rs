@@ -44,14 +44,17 @@ impl<T: Clone + Send + Sync> State<T> {
         }
     }
 
-    /// Returns state guard asynchronously.
+    /// Returns state guard asynchronously with lazy Copy-On-Write.
     pub async fn lock(&self) -> StateGuard<T> {
         let wrap = self.get_or_init().clone();
+        let _guard = wrap.mutex.lock_owned().await;
+        let current_arc = wrap.swap.load_full();
 
         StateGuard {
-            _guard: wrap.mutex.lock_owned().await,
+            _guard,
             swap: wrap.swap.clone(),
-            data: (*wrap.swap.load_full()).clone(),
+            current_arc,
+            mutated_data: None,
             counter: 0,
         }
     }

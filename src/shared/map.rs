@@ -1,8 +1,4 @@
-pub mod item;
-pub use item::SharedItem;
-
-pub mod guard;
-pub use guard::{SharedGuard, SharedGuardMut};
+use super::{SharedGuard, SharedGuardMut, SharedItem};
 
 use ahash::RandomState;
 use once_cell::sync::OnceCell;
@@ -50,7 +46,7 @@ impl<K: Eq + Hash + 'static, V: 'static> SharedMap<K, V> {
     fn get_or_init(&self) -> &Arc<SharedMapInner<K, V>> {
         self.inner.get_or_init(|| {
             let shards = std::array::from_fn(|_| Shard {
-                map: tokio::sync::RwLock::new(HashMap::new()),
+                map: RwLock::new(HashMap::new()),
             });
             Arc::new(SharedMapInner {
                 shards,
@@ -106,12 +102,38 @@ impl<K: Eq + Hash + 'static, V: 'static> SharedMap<K, V> {
         guard.remove(key)
     }
 
+    /// Returns true if contains an item with this key.
+    pub async fn contains_key(&self, key: &K) -> bool {
+        let Some(inner) = self.inner.get() else {
+            return false;
+        };
+        let shard = self.get_shard(inner, key);
+        let guard = shard.map.read().await;
+        guard.contains_key(key)
+    }
+
     /// Fetches `SharedItem` for the value corresponding to the given key.
     pub async fn get(&self, key: &K) -> Option<SharedItem<V>> {
         let inner = self.get_or_init();
         let shard = self.get_shard(inner, key);
         let guard = shard.map.read().await;
         guard.get(key).cloned()
+    }
+
+    /// Returns a vector with all elements of `SharedItem<V>`.
+    pub async fn get_all(&self) -> Vec<SharedItem<V>> {
+        let Some(inner) = self.inner.get() else {
+            return Vec::new();
+        };
+
+        let mut items = Vec::with_capacity(self.count().await);
+
+        for shard in &inner.shards {
+            let guard = shard.map.read().await;
+            items.extend(guard.values().cloned());
+        }
+
+        items
     }
 
     /// Fetches read-only guard for the value corresponding to the given key.
