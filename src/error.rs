@@ -5,12 +5,18 @@ use macron::{Display, Error, From};
 // The error
 #[derive(Debug, Display, Error, From)]
 pub enum Error {
-    Io(std::io::Error),
+    #[display(fmt = "{0}")]
+    Custom(String),
 
+    #[display(fmt = "{0}: {1}")]
+    Titled(String, DynError),
+
+    #[from(skip)]
     #[cfg(any(feature = "json-config", feature = "toml-config"))]
     #[display(fmt = "Unsupported config extension '.{0}'.")]
     ConfigExt(String),
 
+    #[from(skip)]
     #[cfg(any(feature = "json-config", feature = "toml-config"))]
     #[display(fmt = "Parse config error: {0}")]
     ParseConfig(DynError),
