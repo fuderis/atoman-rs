@@ -5,8 +5,10 @@ pub type DynError = Box<dyn std::error::Error + Send + Sync>;
 pub type Result<T> = std::result::Result<T, DynError>;
 pub use std::result::Result as StdResult;
 
+mod prelude;
+
 pub mod error;
-pub mod prelude;
+pub use error::Error;
 
 pub mod flag;
 pub use flag::Flag;

@@ -1,17 +1,16 @@
-use atoman::prelude::*;
+use atoman::Flag;
 
-static IS_ACTIVE: Flag = Flag::new();
+static STATUS: Flag = Flag::new(false);
 
-#[tokio::main]
-async fn main() {
-    assert!(!IS_ACTIVE.is_locked());
+fn main() {
+    assert!(!STATUS.is_disabled());
 
-    IS_ACTIVE.lock().await;
-    assert!(IS_ACTIVE.is_locked());
+    STATUS.enable();
+    assert!(STATUS.is_enabled());
 
-    IS_ACTIVE.unlock();
-    assert!(!IS_ACTIVE.is_locked());
+    STATUS.disable();
+    assert!(STATUS.is_disabled());
 
-    IS_ACTIVE.blocking_lock();
-    assert!(IS_ACTIVE.is_locked());
+    STATUS.set(true);
+    assert!(STATUS.is_enabled());
 }
