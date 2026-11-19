@@ -1,3 +1,6 @@
+pub mod error;
+pub use error::ChannelError;
+
 pub mod sender;
 pub use sender::Sender;
 

@@ -1,11 +1,13 @@
+use super::ChannelError;
 use crate::prelude::*;
+
 use tokio::sync::{Mutex, mpsc, oneshot};
 
 /// Generic channel sender.
 pub enum Sender<T> {
-    Unbounded(mpsc::UnboundedSender<Result<T>>),
-    Bounded(mpsc::Sender<Result<T>>),
-    Oneshot(Arc<Mutex<Option<oneshot::Sender<Result<T>>>>>),
+    Unbounded(mpsc::UnboundedSender<Result<T, DynError>>),
+    Bounded(mpsc::Sender<Result<T, DynError>>),
+    Oneshot(Arc<Mutex<Option<oneshot::Sender<Result<T, DynError>>>>>),
 }
 
 impl<T> Clone for Sender<T> {
@@ -20,55 +22,60 @@ impl<T> Clone for Sender<T> {
 
 impl<T> Sender<T> {
     /// Helper method to send raw Result synchronously.
-    fn send_raw_sync(&self, res: Result<T>) -> Result<()> {
+    fn send_raw_sync(&self, res: Result<T, DynError>) -> Result<(), Error> {
         match self {
-            Self::Unbounded(tx) => tx.send(res).map_err(|_| Error::ChannelClosed.into()),
+            Self::Unbounded(tx) => tx.send(res).map_err(|_| ChannelError::ChannelClosed.into()),
             Self::Bounded(tx) => match tx.try_send(res) {
                 Ok(_) => Ok(()),
-                Err(mpsc::error::TrySendError::Full(_)) => Err(Error::ChannelFull.into()),
-                Err(mpsc::error::TrySendError::Closed(_)) => Err(Error::ChannelClosed.into()),
+                Err(mpsc::error::TrySendError::Full(_)) => Err(ChannelError::ChannelFull.into()),
+                Err(mpsc::error::TrySendError::Closed(_)) => {
+                    Err(ChannelError::ChannelClosed.into())
+                }
             },
             Self::Oneshot(tx) => {
                 let Ok(mut guard) = tx.try_lock() else {
-                    return Err(Error::ChannelClosed.into());
+                    return Err(ChannelError::ChannelClosed.into());
                 };
                 if let Some(oneshot_tx) = guard.take() {
                     oneshot_tx
                         .send(res)
-                        .map_err(|_| Error::ChannelClosed.into())
+                        .map_err(|_| ChannelError::ChannelClosed.into())
                 } else {
-                    Err(Error::ChannelClosed.into())
+                    Err(ChannelError::ChannelClosed.into())
                 }
             }
         }
     }
 
     /// Helper method to send raw Result asynchronously.
-    async fn send_raw_async(&self, res: Result<T>) -> Result<()> {
+    async fn send_raw_async(&self, res: Result<T, DynError>) -> Result<(), Error> {
         match self {
-            Self::Unbounded(tx) => tx.send(res).map_err(|_| Error::ChannelClosed.into()),
-            Self::Bounded(tx) => tx.send(res).await.map_err(|_| Error::ChannelClosed.into()),
+            Self::Unbounded(tx) => tx.send(res).map_err(|_| ChannelError::ChannelClosed.into()),
+            Self::Bounded(tx) => tx
+                .send(res)
+                .await
+                .map_err(|_| ChannelError::ChannelClosed.into()),
             Self::Oneshot(_) => self.send_raw_sync(res),
         }
     }
 
     /// Non-blocking send: returns ChannelFull error if bounded channel is capacity-constrained.
-    pub fn send(&self, item: impl Into<T>) -> Result<()> {
+    pub fn send(&self, item: impl Into<T>) -> Result<(), Error> {
         self.send_raw_sync(Ok(item.into()))
     }
 
     /// Async send: waits until capacity is available in bounded channel.
-    pub async fn send_async(&self, item: impl Into<T>) -> Result<()> {
+    pub async fn send_async(&self, item: impl Into<T>) -> Result<(), Error> {
         self.send_raw_async(Ok(item.into())).await
     }
 
     /// Non-blocking error send.
-    pub fn send_err(&self, error: DynError) -> Result<()> {
+    pub fn send_err(&self, error: DynError) -> Result<(), Error> {
         self.send_raw_sync(Err(error))
     }
 
     /// Async error send.
-    pub async fn send_err_async(&self, error: DynError) -> Result<()> {
+    pub async fn send_err_async(&self, error: DynError) -> Result<(), Error> {
         self.send_raw_async(Err(error)).await
     }
 
@@ -104,20 +111,20 @@ impl<T> Sender<T> {
     }
 }
 
-impl<T> From<mpsc::UnboundedSender<Result<T>>> for Sender<T> {
-    fn from(tx: mpsc::UnboundedSender<Result<T>>) -> Self {
+impl<T> From<mpsc::UnboundedSender<Result<T, DynError>>> for Sender<T> {
+    fn from(tx: mpsc::UnboundedSender<Result<T, DynError>>) -> Self {
         Self::Unbounded(tx)
     }
 }
 
-impl<T> From<mpsc::Sender<Result<T>>> for Sender<T> {
-    fn from(tx: mpsc::Sender<Result<T>>) -> Self {
+impl<T> From<mpsc::Sender<Result<T, DynError>>> for Sender<T> {
+    fn from(tx: mpsc::Sender<Result<T, DynError>>) -> Self {
         Self::Bounded(tx)
     }
 }
 
-impl<T> From<oneshot::Sender<Result<T>>> for Sender<T> {
-    fn from(tx: oneshot::Sender<Result<T>>) -> Self {
+impl<T> From<oneshot::Sender<Result<T, DynError>>> for Sender<T> {
+    fn from(tx: oneshot::Sender<Result<T, DynError>>) -> Self {
         Self::Oneshot(Arc::new(Mutex::new(Some(tx))))
     }
 }

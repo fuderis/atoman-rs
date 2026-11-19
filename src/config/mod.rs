@@ -1,3 +1,6 @@
+pub mod error;
+pub use error::ConfigError;
+
 use crate::{State, prelude::*};
 
 pub use atoman_config::config;
@@ -10,7 +13,7 @@ use std::{
 };
 use tokio::fs;
 
-/// The config modify metadata
+/// Config modify metadata.
 #[derive(Default, Debug, Clone)]
 struct Modify {
     modified: Option<DateTime<Utc>>,
@@ -18,7 +21,7 @@ struct Modify {
 }
 
 impl Modify {
-    /// Creates a new Modify instance
+    /// Creates a new Modify instance.
     pub fn now() -> Self {
         Self {
             modified: Some(Utc::now()),
@@ -27,7 +30,7 @@ impl Modify {
     }
 }
 
-/// The atomic config wrapper
+/// Atomic config wrapper.
 #[derive(Default, Clone)]
 pub struct Config<
     T: Default + std::fmt::Debug + Clone + Serialize + DeserializeOwned + Send + Sync + 'static,
@@ -41,8 +44,8 @@ impl<T> Config<T>
 where
     T: Clone + Default + std::fmt::Debug + Serialize + DeserializeOwned + Send + Sync + 'static,
 {
-    /// Reads the config file or creates the default
-    pub async fn new<P: Into<PathBuf>>(file_path: P) -> Result<Self> {
+    /// Reads config file or creates default.
+    pub async fn new<P: Into<PathBuf>>(file_path: P) -> Result<Self, Error> {
         let file_path = file_path.into();
 
         // reading the config file
@@ -59,13 +62,13 @@ where
         Ok(this)
     }
 
-    /// Returns the config file path
+    /// Returns config file path.
     pub fn path(&self) -> &PathBuf {
         &self.path
     }
 
-    /// Parses the config from a raw text
-    pub fn parse<P: Into<PathBuf>>(file_path: P, contents: &str) -> Result<Self> {
+    /// Parses config from a raw text.
+    pub fn parse<P: Into<PathBuf>>(file_path: P, contents: &str) -> Result<Self, Error> {
         let path = file_path.into();
 
         let data: T = match path
@@ -75,15 +78,17 @@ where
             .to_uppercase()
             .as_str()
         {
-            #[cfg(any(feature = "toml-config"))]
-            "TOML" => toml::from_str(contents).map_err(|e| Error::ParseConfig(Box::new(e)))?,
+            #[cfg(feature = "toml-config")]
+            "TOML" => toml::from_str(contents)
+                .map_err(|e| ConfigError::TomlParseError(e.into()))
+                .map_err(Error::from)?,
 
-            #[cfg(any(feature = "json-config"))]
-            "JSON" => {
-                serde_json::from_str(contents).map_err(|e| Error::ParseConfig(Box::new(e)))?
-            }
+            #[cfg(feature = "json-config")]
+            "JSON" => serde_json::from_str(contents)
+                .map_err(|e| ConfigError::JsonParseError(e.into()))
+                .map_err(Error::from)?,
 
-            ext => return Err(Error::ConfigExt(ext.to_owned()).into()),
+            ext => return Err(ConfigError::UnsupportedExt(ext.to_owned()).into()),
         };
 
         Ok(Self {
@@ -93,17 +98,17 @@ where
         })
     }
 
-    /// Reads the config file
-    pub async fn read<P: Into<PathBuf>>(file_path: P) -> Result<Self> {
+    /// Reads config file.
+    pub async fn read<P: Into<PathBuf>>(file_path: P) -> Result<Self, Error> {
         let file_path = file_path.into();
 
         // reading the config file
-        let contents = fs::read_to_string(&file_path).await?;
+        let contents = fs::read_to_string(&file_path).await.map_err(Error::from)?;
         Self::parse(file_path, &contents)
     }
 
-    /// Saves the config to custom file path safely using a temp file
-    pub async fn write<P: Into<PathBuf>>(&mut self, file_path: P) -> Result<()> {
+    /// Saves config to custom file path safely using a temp file.
+    pub async fn write<P: Into<PathBuf>>(&mut self, file_path: P) -> Result<(), Error> {
         self.path = file_path.into();
 
         // 1. Definition of extension and serialization
@@ -116,15 +121,19 @@ where
             .as_ref()
         {
             #[cfg(feature = "toml-config")]
-            "TOML" => toml::to_string_pretty(&self.data)?,
+            "TOML" => toml::to_string_pretty(&self.data)
+                .map_err(|e| ConfigError::TomlSerializeError(e.into()))
+                .map_err(Error::from)?,
 
             #[cfg(feature = "json-config")]
-            "JSON" => serde_json::to_string_pretty(&self.data)?,
+            "JSON" => serde_json::to_string_pretty(&self.data)
+                .map_err(|e| ConfigError::JsonSerializeError(e.into()))
+                .map_err(Error::from)?,
 
-            ext => return Err(Error::ConfigExt(ext.to_owned()).into()),
+            ext => return Err(ConfigError::UnsupportedExt(ext.to_owned()).into()),
         };
 
-        // 2. Creating the parent directory if it does not exist.
+        // 2. Creating parent directory if it does not exist.
         if let Some(parent_dir) = self.path.parent() {
             fs::create_dir_all(parent_dir).await?;
         }
@@ -138,20 +147,20 @@ where
         // 4. Writing to a temporary file
         fs::write(&tmp_path, &contents).await?;
 
-        // 5. (Optional) Forcing the OS buffers to be flushed to the physical disk (fsync)
-        // To ensure that the data is physically written before renaming
+        // 5. Forcing OS buffers to be flushed to the physical disk (fsync)
+        // (to ensure that data is physically written before renaming)
         if let Ok(file) = fs::File::open(&tmp_path).await {
             let _ = file.sync_all().await;
         }
 
         // 6. Atomic renaming: .tmp replaces the original file
         if let Err(e) = fs::rename(&tmp_path, &self.path).await {
-            // If the renaming fails, we clean up the .tmp files.
+            // if the renaming fails, clean up the .tmp files
             let _ = fs::remove_file(&tmp_path).await;
             return Err(e.into());
         }
 
-        // 7. Update the metadata regarding the time of changes in memory.
+        // 7. Update metadata regarding the time of changes in memory.
         let mut guard = self.modify.lock().await;
         guard.modified = Some(Utc::now());
         guard.checked = Some(Instant::now());
@@ -159,13 +168,13 @@ where
         Ok(())
     }
 
-    /// Updates the config file
-    pub async fn save(&mut self) -> Result<()> {
+    /// Updates config file.
+    pub async fn save(&mut self) -> Result<(), Error> {
         self.write(self.path.clone()).await
     }
 
-    /// Returns true if the data needs to be updated
-    pub async fn check(&self, millis: u64) -> Result<bool> {
+    /// Returns true if data needs to be updated.
+    pub async fn check(&self, millis: u64) -> Result<bool, Error> {
         let interval = Duration::from_millis(millis);
 
         // check last checked time (dirty method for quick access to the latest cached state)
@@ -201,9 +210,9 @@ where
         Ok(true)
     }
 
-    /// Updates the struct data from config file (returns true if updated)
-    pub async fn update(&mut self) -> Result<bool> {
-        // read the actual file contents
+    /// Updates struct data from config file (returns true if updated).
+    pub async fn update(&mut self) -> Result<bool, Error> {
+        // read actual file contents
         let cfg = Self::read(&self.path).await?;
         *self = cfg;
 

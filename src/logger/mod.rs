@@ -1,3 +1,6 @@
+pub mod error;
+pub use error::LoggerError;
+
 use crate::prelude::*;
 
 pub use atoman_log::log;
@@ -92,7 +95,7 @@ impl Logger {
     }
 
     /// Initializes logger.
-    pub async fn init<P: Into<PathBuf>>(logs_dir: P, max_files: usize) -> Result<()> {
+    pub async fn init<P: Into<PathBuf>>(logs_dir: P, max_files: usize) -> Result<(), Error> {
         let logs_dir = logs_dir.into();
 
         let path = if !logs_dir.as_os_str().is_empty() {
@@ -101,13 +104,16 @@ impl Logger {
             if max_files > 0 {
                 let mut entries = fs::read_dir(&logs_dir).await?;
                 let mut files = vec![];
+
                 while let Some(entry) = entries.next_entry().await? {
                     let path = entry.path();
                     if path.extension().map_or(false, |ext| ext == "log") {
                         files.push((path, entry.metadata().await.and_then(|m| m.created()).ok()));
                     }
                 }
+
                 files.sort_by_key(|(_, time)| *time);
+
                 if files.len() > max_files {
                     for (old_file, _) in &files[0..files.len() - max_files] {
                         let _ = fs::remove_file(old_file).await;
@@ -154,16 +160,19 @@ impl Logger {
     }
 
     /// Traces all logs in current file by filter.
-    pub async fn trace(filters: &[String]) -> Result<String> {
+    pub async fn trace(filters: &[String]) -> Result<String, Error> {
         let Some(file_path) = LOGGER_STATE.get().path.clone() else {
-            return Err("Log file path is missing".into());
+            return Err(LoggerError::FilePathMissing.into());
         };
 
         Self::trace_file(file_path, filters).await
     }
 
     /// Traces all logs in file by filter.
-    pub async fn trace_file(file_path: impl AsRef<Path>, filters: &[String]) -> Result<String> {
+    pub async fn trace_file(
+        file_path: impl AsRef<Path>,
+        filters: &[String],
+    ) -> Result<String, Error> {
         Self::flush().await;
 
         let file = File::open(file_path.as_ref()).await?;
@@ -204,7 +213,7 @@ where
         id: &tracing::Id,
         ctx: Context<'_, S>,
     ) {
-        let span = ctx.span(id).expect("Спан обязан существовать");
+        let span = ctx.span(id).expect("Span must exist.");
         let mut fields_str = String::new();
 
         struct SpanFieldsVisitor<'a>(&'a mut String, bool);

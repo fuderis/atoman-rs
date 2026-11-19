@@ -8,14 +8,14 @@ use tokio::sync::{mpsc, oneshot};
 
 /// Generic channel receiver.
 pub enum Receiver<T> {
-    Unbounded(mpsc::UnboundedReceiver<Result<T>>),
-    Bounded(mpsc::Receiver<Result<T>>),
-    Oneshot(Option<oneshot::Receiver<Result<T>>>),
+    Unbounded(mpsc::UnboundedReceiver<Result<T, DynError>>),
+    Bounded(mpsc::Receiver<Result<T, DynError>>),
+    Oneshot(Option<oneshot::Receiver<Result<T, DynError>>>),
 }
 
 impl<T> Receiver<T> {
     /// Receives next data from receiver.
-    pub async fn recv(&mut self) -> Result<Option<T>> {
+    pub async fn recv(&mut self) -> Result<Option<T>, DynError> {
         match self {
             Self::Unbounded(rx) => match rx.recv().await {
                 Some(Ok(item)) => Ok(Some(item)),
@@ -36,14 +36,14 @@ impl<T> Receiver<T> {
                 match rx.await {
                     Ok(Ok(item)) => Ok(Some(item)),
                     Ok(Err(err)) => Err(err),
-                    Err(_) => Ok(None), // Disconnected / closed
+                    Err(_) => Ok(None),
                 }
             }
         }
     }
 
     /// Non-blocking attempt to receive data from receiver.
-    pub fn try_recv(&mut self) -> Result<Option<T>> {
+    pub fn try_recv(&mut self) -> Result<Option<T>, DynError> {
         use mpsc::error::TryRecvError as MpscTryRecvError;
         use oneshot::error::TryRecvError as OneshotTryRecvError;
 
@@ -68,7 +68,6 @@ impl<T> Receiver<T> {
                     Ok(Ok(item)) => Ok(Some(item)),
                     Ok(Err(err)) => Err(err),
                     Err(OneshotTryRecvError::Empty) => {
-                        // Возвращаем обратно в Option, так как сигнал еще не пришел
                         *rx_opt = Some(rx);
                         Ok(None)
                     }
@@ -88,26 +87,26 @@ impl<T> Receiver<T> {
     }
 }
 
-impl<T> From<mpsc::UnboundedReceiver<Result<T>>> for Receiver<T> {
-    fn from(rx: mpsc::UnboundedReceiver<Result<T>>) -> Self {
+impl<T> From<mpsc::UnboundedReceiver<Result<T, DynError>>> for Receiver<T> {
+    fn from(rx: mpsc::UnboundedReceiver<Result<T, DynError>>) -> Self {
         Self::Unbounded(rx)
     }
 }
 
-impl<T> From<mpsc::Receiver<Result<T>>> for Receiver<T> {
-    fn from(rx: mpsc::Receiver<Result<T>>) -> Self {
+impl<T> From<mpsc::Receiver<Result<T, DynError>>> for Receiver<T> {
+    fn from(rx: mpsc::Receiver<Result<T, DynError>>) -> Self {
         Self::Bounded(rx)
     }
 }
 
-impl<T> From<oneshot::Receiver<Result<T>>> for Receiver<T> {
-    fn from(rx: oneshot::Receiver<Result<T>>) -> Self {
+impl<T> From<oneshot::Receiver<Result<T, DynError>>> for Receiver<T> {
+    fn from(rx: oneshot::Receiver<Result<T, DynError>>) -> Self {
         Self::Oneshot(Some(rx))
     }
 }
 
 impl<T> Future for Receiver<T> {
-    type Output = Result<Option<T>>;
+    type Output = Result<Option<T>, DynError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match &mut *self {
