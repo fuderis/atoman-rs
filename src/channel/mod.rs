@@ -1,5 +1,5 @@
 pub mod error;
-pub use error::ChannelError;
+pub use error::Error as ChannelError;
 
 pub mod sender;
 pub use sender::Sender;

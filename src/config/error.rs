@@ -1,9 +1,8 @@
 use macron::{Display, Error, From};
 
 #[derive(Debug, Display, Error, From)]
-pub enum ConfigError {
+pub enum Error {
     #[from(skip)]
-    #[cfg(any(feature = "json-config", feature = "toml-config"))]
     #[display(fmt = "Unsupported config extension `.{0}`.")]
     UnsupportedExt(String),
 

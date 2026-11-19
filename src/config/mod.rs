@@ -1,5 +1,5 @@
 pub mod error;
-pub use error::ConfigError;
+pub use error::Error as ConfigError;
 
 use crate::{State, prelude::*};
 

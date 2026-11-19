@@ -1,5 +1,5 @@
 pub mod error;
-pub use error::LoggerError;
+pub use error::Error as LoggerError;
 
 use crate::prelude::*;
 
