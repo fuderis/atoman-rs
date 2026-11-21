@@ -3,7 +3,7 @@ name = "atoman"
 description = "A library for managing shared asynchronous data across threads. Provides safe concurrent access to application state with automatic synchronization and minimizes the need for manual lock management."
 keywords = ["atomic", "static", "flag", "state", "config"]
 categories = ["development-tools", "rust-patterns"]
-version = "0.13.2"
+version = "0.14.0"
 license = "MIT"
 authors = ["Bulat Sh. <synapdrake@ya.ru>"]
 repository = "https://github.com/fuderis/atoman-rs"
@@ -26,6 +26,7 @@ arc-swap = "1.8.0"
 once_cell = "1.21.3"
 macron = { version = "0.6.1", features = ["derive", "string", "async"] }
 tokio = { version = "1.49.0", features = ["full"] }
+tokio-stream = { version = "0.1.19", optional = true }
 ahash = "0.8.12"
 
 atoman-macros = { version = "0.1.1", optional = true }
@@ -46,9 +47,10 @@ regex = { version = "1.12.3", optional = true }
 
 [features]
 default = ["re-export"]
-full = ["channel", "config", "toml-config", "json-config", "logger", "trace"]
+full = ["stream", "channel", "config", "toml-config", "json-config", "logger", "trace"]
 
 re-export = ["dep:atoman-macros"]
+stream = ["dep:tokio-stream"]
 
 json-config = ["config", "dep:serde_json"]
 toml-config = ["config", "dep:toml"]

@@ -24,6 +24,7 @@ pub use once_cell::{self, sync::Lazy};
 
 #[cfg(feature = "re-export")]
 pub use atoman_macros::{main, test};
+
 #[cfg(feature = "re-export")]
 pub use tokio::{
     self, fs, io, net,
@@ -33,6 +34,9 @@ pub use tokio::{
     task::{self, JoinHandle, spawn, spawn_blocking},
     time::{self, Duration, Instant, sleep, timeout},
 };
+
+#[cfg(feature = "stream")]
+pub use tokio_stream::{self, StreamExt};
 
 #[cfg(feature = "config")]
 pub mod config;
